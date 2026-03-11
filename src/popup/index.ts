@@ -81,8 +81,10 @@ async function loadSettings() {
   const s = res.settings
 
   ;($ ('input-name') as HTMLInputElement).value = s.petName
+  ;($ ('input-provider') as HTMLSelectElement).value = s.provider
+  ;($ ('input-baseurl') as HTMLInputElement).value = s.apiBaseUrl
   ;($ ('input-apikey') as HTMLInputElement).value = s.apiKey
-  ;($ ('input-model') as HTMLSelectElement).value = s.model
+  ;($ ('input-model') as HTMLInputElement).value = s.model
   ;($ ('input-tracking') as HTMLInputElement).checked = s.enableBrowsingTracker
   ;($ ('input-visible') as HTMLInputElement).checked = s.petVisible
 }
@@ -90,8 +92,10 @@ async function loadSettings() {
 $('btn-save').addEventListener('click', async () => {
   const settings: Partial<Settings> = {
     petName: ($ ('input-name') as HTMLInputElement).value.trim() || '小爪',
+    provider: ($ ('input-provider') as HTMLSelectElement).value as Settings['provider'],
+    apiBaseUrl: ($ ('input-baseurl') as HTMLInputElement).value.trim(),
     apiKey: ($ ('input-apikey') as HTMLInputElement).value.trim(),
-    model: ($ ('input-model') as HTMLSelectElement).value,
+    model: ($ ('input-model') as HTMLInputElement).value.trim(),
     enableBrowsingTracker: ($ ('input-tracking') as HTMLInputElement).checked,
     petVisible: ($ ('input-visible') as HTMLInputElement).checked,
   }

@@ -131,9 +131,13 @@ export type BackgroundResponse =
 
 // ── Settings ───────────────────────────────────────────
 
+export type LLMProvider = 'minimax' | 'claude' | 'openai-compatible'
+
 export interface Settings {
+  provider: LLMProvider
   apiKey: string
-  model: string                  // 'claude-sonnet-4-20250514' etc
+  apiBaseUrl: string             // e.g. 'https://api.minimax.io/v1'
+  model: string                  // e.g. 'MiniMax-M2.5-Lightning'
   petName: string
   enableBrowsingTracker: boolean
   language: 'zh' | 'en' | 'auto'

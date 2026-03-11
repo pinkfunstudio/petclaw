@@ -65,6 +65,8 @@
     if (!res.ok || !res.settings) return;
     const s = res.settings;
     $("input-name").value = s.petName;
+    $("input-provider").value = s.provider;
+    $("input-baseurl").value = s.apiBaseUrl;
     $("input-apikey").value = s.apiKey;
     $("input-model").value = s.model;
     $("input-tracking").checked = s.enableBrowsingTracker;
@@ -73,8 +75,10 @@
   $("btn-save").addEventListener("click", async () => {
     const settings = {
       petName: $("input-name").value.trim() || "\u5C0F\u722A",
+      provider: $("input-provider").value,
+      apiBaseUrl: $("input-baseurl").value.trim(),
       apiKey: $("input-apikey").value.trim(),
-      model: $("input-model").value,
+      model: $("input-model").value.trim(),
       enableBrowsingTracker: $("input-tracking").checked,
       petVisible: $("input-visible").checked
     };

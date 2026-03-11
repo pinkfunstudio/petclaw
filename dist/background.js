@@ -29,8 +29,10 @@ var STAGE_NAMES = {
   adult: { zh: "\u6210\u5E74", en: "Adult" }
 };
 var DEFAULT_SETTINGS = {
+  provider: "minimax",
   apiKey: "",
-  model: "claude-sonnet-4-20250514",
+  apiBaseUrl: "https://api.minimax.io/v1",
+  model: "MiniMax-M2.5-Lightning",
   petName: "\u5C0F\u722A",
   enableBrowsingTracker: false,
   language: "auto",
@@ -147,7 +149,57 @@ async function saveSettings(settings) {
 }
 
 // src/background/llm.ts
-async function chatWithLLM(messages, systemPrompt, apiKey, model, onChunk) {
+async function chatWithLLM(messages, systemPrompt, apiKey, model, onChunk, provider = "minimax", apiBaseUrl = "https://api.minimax.io/v1") {
+  if (provider === "claude") {
+    return chatClaude(messages, systemPrompt, apiKey, model, onChunk);
+  }
+  return chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChunk, apiBaseUrl);
+}
+async function chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChunk, apiBaseUrl) {
+  try {
+    const base = apiBaseUrl.replace(/\/+$/, "");
+    const url = base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
+    const allMessages = [
+      { role: "system", content: systemPrompt },
+      ...messages
+    ];
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages: allMessages,
+        max_tokens: 300,
+        stream: true
+      })
+    });
+    if (!response.ok) {
+      const errorBody = await response.text();
+      let errorMsg = `API error ${response.status}`;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.base_resp?.status_msg || errorMsg;
+      } catch {
+      }
+      return `[Error: ${errorMsg}]`;
+    }
+    return parseSSEStream(response, (data) => {
+      const content = data.choices?.[0]?.delta?.content;
+      if (content) {
+        onChunk(content);
+        return content;
+      }
+      return "";
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `[Error: ${message}]`;
+  }
+}
+async function chatClaude(messages, systemPrompt, apiKey, model, onChunk) {
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -174,42 +226,49 @@ async function chatWithLLM(messages, systemPrompt, apiKey, model, onChunk) {
       }
       return `[Error: ${errorMsg}]`;
     }
-    const reader = response.body?.getReader();
-    if (!reader) {
-      return "[Error: No response stream]";
-    }
-    const decoder = new TextDecoder();
-    let fullText = "";
-    let buffer = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") continue;
-        try {
-          const event = JSON.parse(data);
-          if (event.type === "content_block_delta" && event.delta?.text) {
-            const text = event.delta.text;
-            fullText += text;
-            onChunk(text);
-          }
-          if (event.type === "error") {
-            return fullText || `[Error: ${event.error?.message || "Stream error"}]`;
-          }
-        } catch {
-        }
+    return parseSSEStream(response, (data) => {
+      if (data.type === "content_block_delta" && data.delta?.text) {
+        onChunk(data.delta.text);
+        return data.delta.text;
       }
-    }
-    return fullText || "[No response]";
+      if (data.type === "error") {
+        return null;
+      }
+      return "";
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return `[Error: ${message}]`;
   }
+}
+async function parseSSEStream(response, extractChunk) {
+  const reader = response.body?.getReader();
+  if (!reader) return "[Error: No response stream]";
+  const decoder = new TextDecoder();
+  let fullText = "";
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6).trim();
+      if (data === "[DONE]") continue;
+      try {
+        const event = JSON.parse(data);
+        const chunk = extractChunk(event);
+        if (chunk === null) {
+          return fullText || "[Error: Stream error]";
+        }
+        fullText += chunk;
+      } catch {
+      }
+    }
+  }
+  return fullText || "[No response]";
 }
 
 // src/background/profiler.ts
@@ -783,7 +842,9 @@ async function handleMessage(msg, sender) {
             chrome.tabs.sendMessage(tabId, chunkMsg).catch(() => {
             });
           }
-        }
+        },
+        settings.provider,
+        settings.apiBaseUrl
       );
       if (tabId != null) {
         const doneMsg = { type: "LLM_DONE", fullText: fullResponse };

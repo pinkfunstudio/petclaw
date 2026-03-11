@@ -341,7 +341,9 @@ async function handleMessage(
             const chunkMsg: MessageToContent = { type: 'LLM_CHUNK', text: chunk }
             chrome.tabs.sendMessage(tabId, chunkMsg).catch(() => {})
           }
-        }
+        },
+        settings.provider,
+        settings.apiBaseUrl
       )
 
       // 6. Send done signal

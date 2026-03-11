@@ -52,8 +52,10 @@ export const STAGE_NAMES: Record<PetStage, { zh: string; en: string }> = {
 
 // ── Default settings ───────────────────────────────────
 export const DEFAULT_SETTINGS = {
+  provider: 'minimax' as const,
   apiKey: '',
-  model: 'claude-sonnet-4-20250514',
+  apiBaseUrl: 'https://api.minimax.io/v1',
+  model: 'MiniMax-M2.5-Lightning',
   petName: '小爪',
   enableBrowsingTracker: false,
   language: 'auto' as const,
