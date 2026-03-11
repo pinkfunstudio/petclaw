@@ -1,0 +1,14 @@
+/* src/content/style.css */
+#petclaw-container {
+  position: fixed;
+  z-index: 2147483647;
+  pointer-events: none;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+#petclaw-container * {
+  pointer-events: auto;
+}
+/*# sourceMappingURL=content.css.map */
