@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PetClaw</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">🦞 PetClaw</div>
+      <div class="version">v0.1</div>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="tabs">
+      <button class="tab active" data-tab="status">状态</button>
+      <button class="tab" data-tab="settings">设置</button>
+      <button class="tab" data-tab="export">导出</button>
+    </div>
+
+    <!-- Status tab -->
+    <div class="tab-content active" id="tab-status">
+      <div class="pet-card">
+        <div class="pet-name" id="pet-name">小爪</div>
+        <div class="pet-stage" id="pet-stage">蛋</div>
+        <div class="pet-days" id="pet-days">第 1 天</div>
+      </div>
+
+      <div class="stats">
+        <div class="stat-row">
+          <span class="stat-label">饥饿</span>
+          <div class="stat-bar"><div class="stat-fill hunger" id="bar-hunger"></div></div>
+          <span class="stat-value" id="val-hunger">20</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">心情</span>
+          <div class="stat-bar"><div class="stat-fill happiness" id="bar-happiness"></div></div>
+          <span class="stat-value" id="val-happiness">50</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">体力</span>
+          <div class="stat-bar"><div class="stat-fill energy" id="bar-energy"></div></div>
+          <span class="stat-value" id="val-energy">80</span>
+        </div>
+      </div>
+
+      <div class="personality" id="personality-section">
+        <div class="section-title">性格</div>
+        <div class="personality-row">
+          <span>内向</span>
+          <div class="personality-bar"><div class="personality-fill" id="p-ie"></div></div>
+          <span>外向</span>
+        </div>
+        <div class="personality-row">
+          <span>严肃</span>
+          <div class="personality-bar"><div class="personality-fill" id="p-sp"></div></div>
+          <span>活泼</span>
+        </div>
+        <div class="personality-row">
+          <span>谨慎</span>
+          <div class="personality-bar"><div class="personality-fill" id="p-cb"></div></div>
+          <span>大胆</span>
+        </div>
+        <div class="personality-row">
+          <span>正式</span>
+          <div class="personality-bar"><div class="personality-fill" id="p-fc"></div></div>
+          <span>随意</span>
+        </div>
+      </div>
+
+      <div class="growth">
+        <div class="section-title">成长</div>
+        <div class="growth-row">
+          <span>经验值</span>
+          <span id="xp-value">0</span>
+        </div>
+        <div class="growth-row">
+          <span>总对话</span>
+          <span id="msg-count">0</span>
+        </div>
+        <div class="growth-row">
+          <span>总互动</span>
+          <span id="interact-count">0</span>
+        </div>
+        <div class="growth-row">
+          <span>喂食次数</span>
+          <span id="feed-count">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings tab -->
+    <div class="tab-content" id="tab-settings">
+      <div class="form-group">
+        <label>宠物名字</label>
+        <input type="text" id="input-name" placeholder="小爪">
+      </div>
+      <div class="form-group">
+        <label>Claude API Key</label>
+        <input type="password" id="input-apikey" placeholder="sk-ant-...">
+      </div>
+      <div class="form-group">
+        <label>模型</label>
+        <select id="input-model">
+          <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="input-tracking">
+          启用浏览行为追踪（仅记录域名）
+        </label>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="input-visible" checked>
+          显示宠物
+        </label>
+      </div>
+      <button class="btn primary" id="btn-save">保存设置</button>
+      <div class="save-status" id="save-status"></div>
+    </div>
+
+    <!-- Export tab -->
+    <div class="tab-content" id="tab-export">
+      <p class="export-desc">导出你的宠物养成数据为 OpenClaw 配置文件。养成时间越长，生成的文件越精准。</p>
+
+      <div class="export-files">
+        <div class="export-file">
+          <div class="file-icon">📜</div>
+          <div class="file-info">
+            <div class="file-name">SOUL.md</div>
+            <div class="file-desc">Agent 人格 — 语气、风格、价值观</div>
+          </div>
+        </div>
+        <div class="export-file">
+          <div class="file-icon">🧠</div>
+          <div class="file-info">
+            <div class="file-name">MEMORY.md</div>
+            <div class="file-desc">共同记忆 — 对话沉淀、知识积累</div>
+          </div>
+        </div>
+        <div class="export-file">
+          <div class="file-icon">👤</div>
+          <div class="file-info">
+            <div class="file-name">USER.md</div>
+            <div class="file-desc">用户画像 — 习惯、偏好、兴趣</div>
+          </div>
+        </div>
+        <div class="export-file">
+          <div class="file-icon">🪪</div>
+          <div class="file-info">
+            <div class="file-name">ID.md</div>
+            <div class="file-desc">身份档案 — 性格、成长历程</div>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn primary" id="btn-export">📦 导出全部（ZIP）</button>
+      <button class="btn secondary" id="btn-preview">👁 预览 SOUL.md</button>
+
+      <div class="preview-box" id="preview-box"></div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

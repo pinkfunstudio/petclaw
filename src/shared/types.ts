@@ -1,0 +1,150 @@
+// ── Pet State ──────────────────────────────────────────
+
+export type PetStage = 'egg' | 'baby' | 'young' | 'teen' | 'adult'
+
+export type PetAction =
+  | 'idle' | 'walk' | 'run' | 'sleep' | 'eat'
+  | 'talk' | 'happy' | 'sad' | 'fall' | 'climb'
+
+export interface Personality {
+  introvert_extrovert: number    // -1 (introvert) to 1 (extrovert)
+  serious_playful: number        // -1 (serious) to 1 (playful)
+  cautious_bold: number          // -1 (cautious) to 1 (bold)
+  formal_casual: number          // -1 (formal) to 1 (casual)
+}
+
+export interface Milestone {
+  day: number
+  stage: PetStage
+  event: string
+}
+
+export interface PetState {
+  // Identity
+  name: string
+  birthday: number               // timestamp
+  stage: PetStage
+
+  // Stats (0-100)
+  hunger: number                 // 0=full, 100=starving
+  happiness: number              // 0=sad, 100=ecstatic
+  energy: number                 // 0=exhausted, 100=full
+
+  // Growth (only goes up)
+  experience: number
+  totalInteractions: number
+  totalMessages: number
+  totalFeedings: number
+  daysActive: number
+
+  // Personality (evolves with interaction)
+  personality: Personality
+
+  // Milestones
+  milestones: Milestone[]
+
+  // Position on screen
+  x: number
+  y: number
+  direction: 1 | -1              // 1=right, -1=left
+  currentAction: PetAction
+
+  // Timestamps
+  lastFed: number
+  lastInteraction: number
+  lastDecay: number              // last time hunger/happiness decayed
+  createdAt: number
+}
+
+// ── User Profile (→ USER.md) ──────────────────────────
+
+export interface UserProfile {
+  activeHours: number[]          // count per hour [0-23]
+  activeDays: number[]           // count per day [0-6]
+  totalSessions: number
+  avgSessionLength: number       // minutes
+
+  language: Record<string, number>        // { "zh": 0.6, "en": 0.4 }
+  toneStats: Record<string, number>       // { "concise": 12, "detailed": 3 }
+  topicDistribution: Record<string, number>
+
+  autonomyPreference: number     // 0-1
+  feedbackStyle: { encouraging: number; strict: number; neutral: number }
+  responsePreference: { short: number; medium: number; long: number }
+
+  timezone: string
+  firstSeen: number
+  lastSeen: number
+}
+
+// ── Memory Store (→ MEMORY.md) ─────────────────────────
+
+export interface MemoryEntry {
+  date: string                   // ISO date
+  summary: string
+  category: 'experience' | 'knowledge' | 'preference'
+}
+
+export interface MemoryPreference {
+  key: string
+  confidence: number             // 0-1
+  firstSeen: string
+  lastSeen: string
+}
+
+export interface MemoryStore {
+  experiences: MemoryEntry[]
+  knowledge: MemoryEntry[]
+  preferences: MemoryPreference[]
+  recentTopics: string[]         // sliding window of recent topics
+}
+
+// ── Chat ───────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: 'user' | 'pet'
+  content: string
+  timestamp: number
+}
+
+// ── Message Protocol (content ↔ background) ────────────
+
+export type MessageToBackground =
+  | { type: 'CHAT'; text: string }
+  | { type: 'FEED' }
+  | { type: 'GET_STATE' }
+  | { type: 'PET_INTERACTION'; action: string }
+  | { type: 'EXPORT' }
+  | { type: 'INIT' }
+  | { type: 'SAVE_SETTINGS'; settings: Partial<Settings> }
+  | { type: 'GET_SETTINGS' }
+
+export type MessageToContent =
+  | { type: 'STATE_UPDATE'; state: PetState }
+  | { type: 'LLM_CHUNK'; text: string }
+  | { type: 'LLM_DONE'; fullText: string }
+  | { type: 'PET_SPEAK'; text: string }
+
+export type BackgroundResponse =
+  | { ok: true; state?: PetState; settings?: Settings; exportData?: ExportData }
+  | { ok: false; error: string }
+
+// ── Settings ───────────────────────────────────────────
+
+export interface Settings {
+  apiKey: string
+  model: string                  // 'claude-sonnet-4-20250514' etc
+  petName: string
+  enableBrowsingTracker: boolean
+  language: 'zh' | 'en' | 'auto'
+  petVisible: boolean
+}
+
+// ── Export ──────────────────────────────────────────────
+
+export interface ExportData {
+  soul: string                   // SOUL.md content
+  memory: string                 // MEMORY.md content
+  user: string                   // USER.md content
+  id: string                     // ID.md content
+}
