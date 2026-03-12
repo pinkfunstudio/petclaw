@@ -33,9 +33,9 @@ var DEFAULT_SETTINGS = {
   apiKey: "",
   apiBaseUrl: "https://api.minimax.io/v1",
   model: "MiniMax-M2.5-Lightning",
-  petName: "\u5C0F\u722A",
+  petName: "Clawdy",
   enableBrowsingTracker: false,
-  language: "auto",
+  language: "en",
   petVisible: true
 };
 

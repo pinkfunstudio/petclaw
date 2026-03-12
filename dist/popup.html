@@ -16,9 +16,9 @@
 
     <!-- Tab bar -->
     <div class="tabs">
-      <button class="tab active" data-tab="status">状态</button>
-      <button class="tab" data-tab="settings">设置</button>
-      <button class="tab" data-tab="export">导出</button>
+      <button class="tab active" data-tab="status">Status</button>
+      <button class="tab" data-tab="settings">Settings</button>
+      <button class="tab" data-tab="export">Export</button>
     </div>
 
     <!-- Status tab -->
@@ -31,62 +31,62 @@
 
       <div class="stats">
         <div class="stat-row">
-          <span class="stat-label">饥饿</span>
+          <span class="stat-label">Hunger</span>
           <div class="stat-bar"><div class="stat-fill hunger" id="bar-hunger"></div></div>
           <span class="stat-value" id="val-hunger">20</span>
         </div>
         <div class="stat-row">
-          <span class="stat-label">心情</span>
+          <span class="stat-label">Happy</span>
           <div class="stat-bar"><div class="stat-fill happiness" id="bar-happiness"></div></div>
           <span class="stat-value" id="val-happiness">50</span>
         </div>
         <div class="stat-row">
-          <span class="stat-label">体力</span>
+          <span class="stat-label">Energy</span>
           <div class="stat-bar"><div class="stat-fill energy" id="bar-energy"></div></div>
           <span class="stat-value" id="val-energy">80</span>
         </div>
       </div>
 
       <div class="personality" id="personality-section">
-        <div class="section-title">性格</div>
+        <div class="section-title">Personality</div>
         <div class="personality-row">
-          <span>内向</span>
+          <span>Intro</span>
           <div class="personality-bar"><div class="personality-fill" id="p-ie"></div></div>
-          <span>外向</span>
+          <span>Extro</span>
         </div>
         <div class="personality-row">
-          <span>严肃</span>
+          <span>Serious</span>
           <div class="personality-bar"><div class="personality-fill" id="p-sp"></div></div>
-          <span>活泼</span>
+          <span>Playful</span>
         </div>
         <div class="personality-row">
-          <span>谨慎</span>
+          <span>Cautious</span>
           <div class="personality-bar"><div class="personality-fill" id="p-cb"></div></div>
-          <span>大胆</span>
+          <span>Bold</span>
         </div>
         <div class="personality-row">
-          <span>正式</span>
+          <span>Formal</span>
           <div class="personality-bar"><div class="personality-fill" id="p-fc"></div></div>
-          <span>随意</span>
+          <span>Casual</span>
         </div>
       </div>
 
       <div class="growth">
-        <div class="section-title">成长</div>
+        <div class="section-title">Growth</div>
         <div class="growth-row">
-          <span>经验值</span>
+          <span>XP</span>
           <span id="xp-value">0</span>
         </div>
         <div class="growth-row">
-          <span>总对话</span>
+          <span>Messages</span>
           <span id="msg-count">0</span>
         </div>
         <div class="growth-row">
-          <span>总互动</span>
+          <span>Interactions</span>
           <span id="interact-count">0</span>
         </div>
         <div class="growth-row">
-          <span>喂食次数</span>
+          <span>Feedings</span>
           <span id="feed-count">0</span>
         </div>
       </div>
@@ -95,15 +95,23 @@
     <!-- Settings tab -->
     <div class="tab-content" id="tab-settings">
       <div class="form-group">
-        <label>宠物名字</label>
-        <input type="text" id="input-name" placeholder="小爪">
+        <label>Pet Name</label>
+        <input type="text" id="input-name" placeholder="Clawdy">
       </div>
       <div class="form-group">
-        <label>LLM 提供商</label>
+        <label>Language</label>
+        <select id="input-language">
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+          <option value="auto">Auto</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>LLM Provider</label>
         <select id="input-provider">
           <option value="minimax">MiniMax</option>
           <option value="claude">Claude (Anthropic)</option>
-          <option value="openai-compatible">OpenAI 兼容</option>
+          <option value="openai-compatible">OpenAI Compatible</option>
         </select>
       </div>
       <div class="form-group">
@@ -115,28 +123,30 @@
         <input type="password" id="input-apikey" placeholder="your-api-key">
       </div>
       <div class="form-group">
-        <label>模型</label>
+        <label>Model</label>
         <input type="text" id="input-model" placeholder="MiniMax-M2.5-Lightning">
       </div>
+      <button class="btn secondary" id="btn-test-api">Test API Connection</button>
+      <div class="test-status" id="test-status"></div>
       <div class="form-group">
         <label class="checkbox-label">
           <input type="checkbox" id="input-tracking">
-          启用浏览行为追踪（仅记录域名）
+          Enable browsing tracker (domain only)
         </label>
       </div>
       <div class="form-group">
         <label class="checkbox-label">
           <input type="checkbox" id="input-visible" checked>
-          显示宠物
+          Show pet
         </label>
       </div>
-      <button class="btn primary" id="btn-save">保存设置</button>
+      <button class="btn primary" id="btn-save">Save Settings</button>
       <div class="save-status" id="save-status"></div>
     </div>
 
     <!-- Export tab -->
     <div class="tab-content" id="tab-export">
-      <p class="export-desc">导出你的宠物养成数据为 OpenClaw 配置文件。养成时间越长，生成的文件越精准。</p>
+      <p class="export-desc">Export your pet's data as OpenClaw config files. The longer you raise it, the more accurate the output.</p>
 
       <div class="export-files">
         <div class="export-file">
@@ -169,8 +179,8 @@
         </div>
       </div>
 
-      <button class="btn primary" id="btn-export">📦 导出全部（ZIP）</button>
-      <button class="btn secondary" id="btn-preview">👁 预览 SOUL.md</button>
+      <button class="btn primary" id="btn-export">Export All Files</button>
+      <button class="btn secondary" id="btn-preview">Preview SOUL.md</button>
 
       <div class="preview-box" id="preview-box"></div>
     </div>

@@ -56,8 +56,8 @@ export const DEFAULT_SETTINGS = {
   apiKey: '',
   apiBaseUrl: 'https://api.minimax.io/v1',
   model: 'MiniMax-M2.5-Lightning',
-  petName: '小爪',
+  petName: 'Clawdy',
   enableBrowsingTracker: false,
-  language: 'auto' as const,
+  language: 'en' as const,
   petVisible: true,
 }

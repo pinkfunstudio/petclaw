@@ -1,4 +1,4 @@
-import type { PetState, Settings, ExportData, MessageToBackground } from '../shared/types'
+import type { PetState, Settings, ExportData, MessageToBackground, LLMProvider } from '../shared/types'
 import { STAGE_NAMES } from '../shared/constants'
 
 // ── DOM refs ───────────────────────────────────────────
@@ -31,24 +31,20 @@ async function loadState() {
 }
 
 function renderState(s: PetState) {
-  // Pet card
   $('pet-name').textContent = s.name
-  $('pet-stage').textContent = STAGE_NAMES[s.stage].zh
+  $('pet-stage').textContent = `${STAGE_NAMES[s.stage].en}`
   const days = Math.max(1, Math.ceil((Date.now() - s.birthday) / 86400000))
-  $('pet-days').textContent = `第 ${days} 天`
+  $('pet-days').textContent = `Day ${days}`
 
-  // Stat bars
   setBar('hunger', s.hunger)
   setBar('happiness', s.happiness)
   setBar('energy', s.energy)
 
-  // Personality bars (-1 to 1 → 0% to 100%)
   setPersonality('p-ie', s.personality.introvert_extrovert)
   setPersonality('p-sp', s.personality.serious_playful)
   setPersonality('p-cb', s.personality.cautious_bold)
   setPersonality('p-fc', s.personality.formal_casual)
 
-  // Growth
   $('xp-value').textContent = String(s.experience)
   $('msg-count').textContent = String(s.totalMessages)
   $('interact-count').textContent = String(s.totalInteractions)
@@ -64,10 +60,7 @@ function setBar(name: string, value: number) {
 
 function setPersonality(id: string, value: number) {
   const el = $(id) as HTMLElement
-  // value is -1 to 1, map to position on the bar
-  // -1 → left edge (0%), 0 → center (50%), 1 → right edge (100%)
   const pct = (value + 1) / 2 * 100
-  // Show as a 10% wide indicator positioned at the value
   const left = Math.max(0, Math.min(90, pct - 5))
   el.style.left = `${left}%`
   el.style.width = '10%'
@@ -80,36 +73,136 @@ async function loadSettings() {
   if (!res.ok || !res.settings) return
   const s = res.settings
 
-  ;($ ('input-name') as HTMLInputElement).value = s.petName
-  ;($ ('input-provider') as HTMLSelectElement).value = s.provider
-  ;($ ('input-baseurl') as HTMLInputElement).value = s.apiBaseUrl
-  ;($ ('input-apikey') as HTMLInputElement).value = s.apiKey
-  ;($ ('input-model') as HTMLInputElement).value = s.model
-  ;($ ('input-tracking') as HTMLInputElement).checked = s.enableBrowsingTracker
-  ;($ ('input-visible') as HTMLInputElement).checked = s.petVisible
+  ;($('input-name') as HTMLInputElement).value = s.petName
+  ;($('input-language') as HTMLSelectElement).value = s.language
+  ;($('input-provider') as HTMLSelectElement).value = s.provider
+  ;($('input-baseurl') as HTMLInputElement).value = s.apiBaseUrl
+  ;($('input-apikey') as HTMLInputElement).value = s.apiKey
+  ;($('input-model') as HTMLInputElement).value = s.model
+  ;($('input-tracking') as HTMLInputElement).checked = s.enableBrowsingTracker
+  ;($('input-visible') as HTMLInputElement).checked = s.petVisible
 }
 
-$('btn-save').addEventListener('click', async () => {
-  const settings: Partial<Settings> = {
-    petName: ($ ('input-name') as HTMLInputElement).value.trim() || '小爪',
-    provider: ($ ('input-provider') as HTMLSelectElement).value as Settings['provider'],
-    apiBaseUrl: ($ ('input-baseurl') as HTMLInputElement).value.trim(),
-    apiKey: ($ ('input-apikey') as HTMLInputElement).value.trim(),
-    model: ($ ('input-model') as HTMLInputElement).value.trim(),
-    enableBrowsingTracker: ($ ('input-tracking') as HTMLInputElement).checked,
-    petVisible: ($ ('input-visible') as HTMLInputElement).checked,
-  }
+// ── Read form values ───────────────────────────────────
 
+function readFormSettings(): Partial<Settings> {
+  return {
+    petName: ($('input-name') as HTMLInputElement).value.trim() || 'Clawdy',
+    language: ($('input-language') as HTMLSelectElement).value as Settings['language'],
+    provider: ($('input-provider') as HTMLSelectElement).value as LLMProvider,
+    apiBaseUrl: ($('input-baseurl') as HTMLInputElement).value.trim(),
+    apiKey: ($('input-apikey') as HTMLInputElement).value.trim(),
+    model: ($('input-model') as HTMLInputElement).value.trim(),
+    enableBrowsingTracker: ($('input-tracking') as HTMLInputElement).checked,
+    petVisible: ($('input-visible') as HTMLInputElement).checked,
+  }
+}
+
+// ── Save ───────────────────────────────────────────────
+
+$('btn-save').addEventListener('click', async () => {
+  const settings = readFormSettings()
   const res = await send<{ ok: boolean }>({ type: 'SAVE_SETTINGS', settings })
   const status = $('save-status')
   if (res.ok) {
-    status.textContent = '已保存'
+    status.textContent = 'Saved!'
     status.style.color = '#4ade80'
   } else {
-    status.textContent = '保存失败'
+    status.textContent = 'Save failed'
     status.style.color = '#ef4444'
   }
   setTimeout(() => { status.textContent = '' }, 2000)
+})
+
+// ── API Test ───────────────────────────────────────────
+
+$('btn-test-api').addEventListener('click', async () => {
+  const statusEl = $('test-status')
+  statusEl.textContent = 'Testing...'
+  statusEl.className = 'test-status'
+
+  const form = readFormSettings()
+  const provider = form.provider || 'minimax'
+  const apiKey = form.apiKey || ''
+  const model = form.model || ''
+  let apiBaseUrl = (form.apiBaseUrl || '').replace(/\/+$/, '')
+
+  if (!apiKey) {
+    statusEl.textContent = 'Please enter an API key first.'
+    statusEl.className = 'test-status error'
+    return
+  }
+
+  try {
+    let url: string
+    let headers: Record<string, string>
+    let body: string
+
+    if (provider === 'claude') {
+      url = 'https://api.anthropic.com/v1/messages'
+      headers = {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      }
+      body = JSON.stringify({
+        model: model || 'claude-sonnet-4-20250514',
+        max_tokens: 10,
+        messages: [{ role: 'user', content: 'Hi' }],
+      })
+    } else {
+      // OpenAI-compatible (MiniMax, etc.)
+      url = apiBaseUrl.endsWith('/chat/completions')
+        ? apiBaseUrl
+        : `${apiBaseUrl}/chat/completions`
+      headers = {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      }
+      body = JSON.stringify({
+        model: model || 'MiniMax-M2.5-Lightning',
+        max_tokens: 10,
+        messages: [
+          { role: 'system', content: 'Reply with OK' },
+          { role: 'user', content: 'test' },
+        ],
+      })
+    }
+
+    statusEl.textContent = `POST ${url}\nAuth: ${provider === 'claude' ? 'x-api-key' : 'Bearer'} ${apiKey.slice(0, 8)}...`
+
+    const response = await fetch(url, { method: 'POST', headers, body })
+    const text = await response.text()
+
+    if (response.ok) {
+      let preview = ''
+      try {
+        const json = JSON.parse(text)
+        if (provider === 'claude') {
+          preview = json.content?.[0]?.text || 'OK'
+        } else {
+          preview = json.choices?.[0]?.message?.content || 'OK'
+        }
+      } catch {
+        preview = text.slice(0, 100)
+      }
+      statusEl.textContent = `Connected! Response: "${preview}"`
+      statusEl.className = 'test-status success'
+    } else {
+      let errorMsg = `HTTP ${response.status}`
+      try {
+        const json = JSON.parse(text)
+        errorMsg += `: ${json.error?.message || json.base_resp?.status_msg || text.slice(0, 200)}`
+      } catch {
+        errorMsg += `: ${text.slice(0, 200)}`
+      }
+      statusEl.textContent = errorMsg
+      statusEl.className = 'test-status error'
+    }
+  } catch (err) {
+    statusEl.textContent = `Network error: ${err instanceof Error ? err.message : String(err)}`
+    statusEl.className = 'test-status error'
+  }
 })
 
 // ── Export ──────────────────────────────────────────────
@@ -119,7 +212,6 @@ $('btn-export').addEventListener('click', async () => {
   if (!res.ok || !res.exportData) return
 
   const data = res.exportData
-  // Create a zip-like download: individual files
   downloadFile('SOUL.md', data.soul)
   downloadFile('MEMORY.md', data.memory)
   downloadFile('USER.md', data.user)
@@ -135,7 +227,7 @@ $('btn-preview').addEventListener('click', async () => {
 
   const res = await send<{ ok: boolean; exportData?: ExportData }>({ type: 'EXPORT' })
   if (!res.ok || !res.exportData) {
-    box.textContent = '无法生成预览，请先与宠物互动。'
+    box.textContent = 'No data yet. Interact with your pet first.'
     box.classList.add('visible')
     return
   }

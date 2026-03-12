@@ -298,12 +298,26 @@ body {
   background: #3a3a4e;
 }
 
-.save-status {
+.save-status, .test-status {
   text-align: center;
   font-size: 12px;
   color: #4ade80;
   min-height: 20px;
   padding-top: 4px;
+}
+
+.test-status {
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.test-status.error {
+  color: #ef4444;
+}
+
+.test-status.success {
+  color: #4ade80;
 }
 
 /* Export */
