@@ -1021,16 +1021,34 @@ chrome.runtime.onInstalled.addListener(async () => {
     const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
     for (const tab of tabs) {
       if (!tab.id) continue;
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ["content.js"]
-      }).catch(() => {
-      });
-      chrome.scripting.insertCSS({
-        target: { tabId: tab.id },
-        files: ["content.css"]
-      }).catch(() => {
-      });
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            window.addEventListener("unhandledrejection", (e) => {
+              if (String(e.reason).includes("Extension context invalidated")) {
+                e.preventDefault();
+              }
+            });
+            window.addEventListener("error", (e) => {
+              if (e.message?.includes("Extension context invalidated")) {
+                e.preventDefault();
+              }
+            });
+            const old = document.getElementById("petclaw-container");
+            if (old) old.remove();
+          }
+        });
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["content.js"]
+        });
+        await chrome.scripting.insertCSS({
+          target: { tabId: tab.id },
+          files: ["content.css"]
+        });
+      } catch {
+      }
     }
   } catch {
   }

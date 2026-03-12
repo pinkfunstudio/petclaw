@@ -531,16 +531,41 @@ chrome.runtime.onInstalled.addListener(async () => {
     const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] })
     for (const tab of tabs) {
       if (!tab.id) continue
-      // Inject JS (it will clean up the old container itself)
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['content.js'],
-      }).catch(() => { /* tab may not allow injection (chrome://, etc.) */ })
-      // Ensure CSS is present
-      chrome.scripting.insertCSS({
-        target: { tabId: tab.id },
-        files: ['content.css'],
-      }).catch(() => {})
+      try {
+        // Step 1: Inject inline cleanup FIRST — suppresses errors from
+        // old orphaned scripts and removes stale DOM, BEFORE the new
+        // content script loads.
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            // Suppress errors from old orphaned content scripts
+            window.addEventListener('unhandledrejection', (e) => {
+              if (String((e as any).reason).includes('Extension context invalidated')) {
+                e.preventDefault()
+              }
+            })
+            window.addEventListener('error', (e) => {
+              if (e.message?.includes('Extension context invalidated')) {
+                e.preventDefault()
+              }
+            })
+            // Remove stale container
+            const old = document.getElementById('petclaw-container')
+            if (old) old.remove()
+          },
+        })
+        // Step 2: Now inject the fresh content script + CSS
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content.js'],
+        })
+        await chrome.scripting.insertCSS({
+          target: { tabId: tab.id },
+          files: ['content.css'],
+        })
+      } catch {
+        // Tab may not allow injection (chrome://, edge://, etc.)
+      }
     }
   } catch {
     // scripting API might fail, non-critical
