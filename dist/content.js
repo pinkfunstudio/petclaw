@@ -1510,7 +1510,9 @@
   };
 
   // src/content/index.ts
-  if (!document.getElementById("petclaw-container")) {
+  {
+    const existing = document.getElementById("petclaw-container");
+    if (existing) existing.remove();
     initPetClaw();
   }
   function initPetClaw() {

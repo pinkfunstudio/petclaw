@@ -15,8 +15,13 @@ import type {
 import { Pet } from './pet'
 import { ChatUI } from './chat'
 
-// Guard against double-injection — bail silently
-if (!document.getElementById('petclaw-container')) {
+// On extension reload, Chrome injects a NEW content script but the OLD
+// one's DOM (#petclaw-container) is still on the page.  The old script's
+// chrome.runtime is dead, so the pet is unresponsive.  We must remove the
+// stale container and reinitialize.
+{
+  const existing = document.getElementById('petclaw-container')
+  if (existing) existing.remove()
   initPetClaw()
 }
 
