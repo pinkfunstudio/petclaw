@@ -1,4 +1,4 @@
-import type { PetState, UserProfile, MemoryStore, ChatMessage, Settings } from './types'
+import type { PetState, UserProfile, MemoryStore, ChatMessage, Settings, ExportData } from './types'
 import { DEFAULT_SETTINGS } from './constants'
 
 // ── Storage keys ───────────────────────────────────────
@@ -9,6 +9,8 @@ const KEYS = {
   MEMORY_STORE: 'petclaw_memory_store',
   CHAT_HISTORY: 'petclaw_chat_history',
   SETTINGS: 'petclaw_settings',
+  EXPORT_DATA: 'petclaw_export_data',
+  EXPORT_UPDATED: 'petclaw_export_updated',
 } as const
 
 // ── Generic get/set ────────────────────────────────────
@@ -134,4 +136,19 @@ export async function getSettings(): Promise<Settings> {
 
 export async function saveSettings(settings: Settings): Promise<void> {
   await set(KEYS.SETTINGS, settings)
+}
+
+// ── Export Data (auto-generated, always up to date) ────
+
+export async function getExportData(): Promise<ExportData | null> {
+  return get<ExportData>(KEYS.EXPORT_DATA)
+}
+
+export async function saveExportData(data: ExportData): Promise<void> {
+  await set(KEYS.EXPORT_DATA, data)
+  await set(KEYS.EXPORT_UPDATED, Date.now())
+}
+
+export async function getExportUpdated(): Promise<number> {
+  return (await get<number>(KEYS.EXPORT_UPDATED)) ?? 0
 }

@@ -2,11 +2,13 @@
  * Pet renderer + physics + behavior state machine.
  *
  * Creates a canvas element, draws the pixel-art lobster scaled up,
- * handles movement along the viewport bottom, drag-and-drop, and
+ * handles movement along the viewport bottom, drag-and-drop with
+ * bounce physics, single/double click differentiation, and
  * autonomous behavior transitions.
  */
 
 import type { PetState, PetAction, PetStage } from '../shared/types'
+import type { PagePlatform } from './elements'
 import {
   PET_SIZE,
   WALK_SPEED,
@@ -24,13 +26,21 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v))
 }
 
-function randRange(min: number, max: number): number {
-  return min + Math.random() * (max - min)
+function randInt(min: number, max: number): number {
+  return Math.floor(min + Math.random() * (max - min + 1))
 }
 
-function randInt(min: number, max: number): number {
-  return Math.floor(randRange(min, max + 1))
-}
+// ── Bounce / physics constants ─────────────────────────
+
+const BOUNCE_DAMPING = 0.45        // velocity multiplier on each bounce
+const BOUNCE_THRESHOLD = 2         // stop bouncing below this velocity
+const SQUASH_FRAMES = 8            // frames of squash animation on land
+const STRETCH_FACTOR = 0.3         // how much to stretch while falling fast
+
+// ── Platform / climbing constants ─────────────────────
+const CLIMB_SPEED = WALK_SPEED * 0.6
+const PLATFORM_SEEK_CHANCE = 0.15       // chance to seek a platform per behavior transition
+const PLATFORM_REFRESH_TICKS = 60       // physics ticks between platform refreshes (~2s at 30fps)
 
 // ── Pet class ───────────────────────────────────────────
 
@@ -44,6 +54,7 @@ export class Pet {
   private x = 200
   private y = 0
   private velocityY = 0
+  private velocityX = 0              // horizontal momentum after throw
   private groundY = 0
   private direction: 1 | -1 = 1
 
@@ -51,20 +62,52 @@ export class Pet {
   private stage: PetStage = 'egg'
   private action: PetAction = 'idle'
   private animFrame = 0
-  private stateTimer = 0          // frames remaining in current behavior
-  private behaviorLocked = false  // true when action was set externally
+  private stateTimer = 0              // frames remaining in current behavior
+  private behaviorLocked = false      // true when action was set externally
+
+  // Squash/stretch
+  private squashTimer = 0             // > 0 while squashing on landing
+  private scaleX = 1                  // current sprite scale X (for squash/stretch)
+  private scaleY = 1                  // current sprite scale Y
 
   // Drag
   private dragging = false
   private dragOffsetX = 0
   private dragOffsetY = 0
+  private dragStartX = 0
+  private dragStartY = 0
+  private lastDragX = 0               // for computing throw velocity
+  private lastDragY = 0
+  private dragMoved = false           // true if moved > threshold during drag
+
+  // Click detection
+  private clickCount = 0
+  private clickTimer: number | null = null
+  private readonly CLICK_DELAY = 250  // ms to wait for double click
+  private pokeCount = 0               // rapid poke counter
+  private pokeResetTimer: number | null = null
+
+  // Bounce state
+  private bouncing = false
+
+  // Platform / climbing
+  private surfaceMode: 'ground' | 'on-platform' | 'climbing' = 'ground'
+  private activePlatform: PagePlatform | null = null
+  private platforms: PagePlatform[] = []
+  private targetPlatform: PagePlatform | null = null
+  private climbSide: 'left' | 'right' = 'right'
+  private platformRefreshCounter = 0
 
   // Timers
   private animInterval: number | null = null
   private physicsInterval: number | null = null
 
-  // Click callback
+  // Callbacks
   private _onClick: (() => void) | null = null
+  private _onDoubleClick: (() => void) | null = null
+  private _onPoke: ((count: number) => void) | null = null
+  private _onDragStart: (() => void) | null = null
+  private _onDrop: (() => void) | null = null
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -94,7 +137,7 @@ export class Pet {
     this.physicsInterval = window.setInterval(() => this.physicsTick(), 1000 / PHYSICS_FPS)
 
     // Set an initial random state duration
-    this.stateTimer = randInt(60, 180)  // 2-6 seconds at 30fps
+    this.stateTimer = randInt(60, 180)
 
     // Bind events
     this.canvas.addEventListener('mousedown', this.handleMouseDown)
@@ -113,8 +156,8 @@ export class Pet {
     this.stage = state.stage
     this.direction = state.direction
 
-    // Only update position from background if not currently dragging/falling
-    if (!this.dragging && this.action !== 'fall') {
+    // Only update position from background if on the ground and not in a special state
+    if (!this.dragging && this.action !== 'fall' && !this.bouncing && this.surfaceMode === 'ground') {
       this.x = clamp(state.x, 0, window.innerWidth - PET_SIZE)
     }
 
@@ -133,7 +176,6 @@ export class Pet {
     this.animFrame = 0
     this.behaviorLocked = true
 
-    // Unlock after a duration based on action
     const duration = action === 'eat' ? 90 : action === 'happy' ? 60 : action === 'sad' ? 90 : 45
     this.stateTimer = duration
 
@@ -145,44 +187,110 @@ export class Pet {
     return { x: this.x, y: this.y }
   }
 
-  /** Get the canvas element (for event delegation) */
+  /** Get the canvas element */
   getCanvas(): HTMLCanvasElement {
     return this.canvas
   }
 
-  /** Register click handler */
+  /** Set available page platforms for climbing/standing */
+  setPlatforms(platforms: PagePlatform[]): void {
+    this.platforms = platforms
+  }
+
+  /** Register single click handler */
   onClick(cb: () => void): void {
     this._onClick = cb
   }
 
+  /** Register double click handler */
+  onDoubleClick(cb: () => void): void {
+    this._onDoubleClick = cb
+  }
+
+  /** Register poke handler (called with poke count) */
+  onPoke(cb: (count: number) => void): void {
+    this._onPoke = cb
+  }
+
+  /** Register drag start handler */
+  onDragStartCallback(cb: () => void): void {
+    this._onDragStart = cb
+  }
+
+  /** Register drop handler (called when pet lands after being dropped) */
+  onDrop(cb: () => void): void {
+    this._onDrop = cb
+  }
+
   // ── Drag handling ─────────────────────────────────────
 
-  onDragStart(clientX: number, clientY: number): void {
+  private startDrag(clientX: number, clientY: number): void {
     this.dragging = true
     this.dragOffsetX = clientX - this.x
     this.dragOffsetY = clientY - this.y
+    this.dragStartX = clientX
+    this.dragStartY = clientY
+    this.lastDragX = clientX
+    this.lastDragY = clientY
+    this.dragMoved = false
     this.canvas.style.cursor = 'grabbing'
     this.velocityY = 0
+    this.velocityX = 0
+    this.bouncing = false
+
+    // Leave platform/climbing state when grabbed
+    this.surfaceMode = 'ground'
+    this.activePlatform = null
+    this.targetPlatform = null
+
+    // Show a "grabbed" reaction after a short hold
+    this.action = 'fall'  // reuse fall sprite for "dangling"
+    this.animFrame = 0
+    this.behaviorLocked = true
   }
 
-  onDragMove(clientX: number, clientY: number): void {
+  private moveDrag(clientX: number, clientY: number): void {
     if (!this.dragging) return
+
+    // Track velocity from last position
+    this.lastDragX = clientX
+    this.lastDragY = clientY
+
     this.x = clientX - this.dragOffsetX
     this.y = clientY - this.dragOffsetY
+
+    // Check if moved beyond threshold
+    const dx = Math.abs(clientX - this.dragStartX)
+    const dy = Math.abs(clientY - this.dragStartY)
+    if (dx > 8 || dy > 8) {
+      this.dragMoved = true
+    }
+
     this.updateCanvasPosition()
   }
 
-  onDragEnd(): void {
+  private endDrag(clientX: number, clientY: number): void {
     if (!this.dragging) return
     this.dragging = false
     this.canvas.style.cursor = 'grab'
 
-    // If above ground, start falling
+    // Compute throw velocity from mouse movement
+    const throwVX = (clientX - this.dragStartX) * 0.15
+    const throwVY = (clientY - this.dragStartY) * 0.1
+
+    // If above ground, start falling with throw velocity
     if (this.y < this.groundY) {
       this.action = 'fall'
       this.animFrame = 0
-      this.velocityY = 0
+      this.velocityY = Math.max(throwVY, 0) // at least fall down
+      this.velocityX = clamp(throwVX, -8, 8)
       this.behaviorLocked = true
+      this._onDragStart?.()
+    } else {
+      // Dropped on ground
+      this.triggerSquash()
+      this.behaviorLocked = false
+      this.stateTimer = randInt(30, 90)
     }
   }
 
@@ -190,6 +298,8 @@ export class Pet {
   destroy(): void {
     if (this.animInterval !== null) clearInterval(this.animInterval)
     if (this.physicsInterval !== null) clearInterval(this.physicsInterval)
+    if (this.clickTimer !== null) clearTimeout(this.clickTimer)
+    if (this.pokeResetTimer !== null) clearTimeout(this.pokeResetTimer)
     this.canvas.removeEventListener('mousedown', this.handleMouseDown)
     this.canvas.removeEventListener('touchstart', this.handleTouchStart)
     window.removeEventListener('mousemove', this.handleMouseMove)
@@ -200,19 +310,56 @@ export class Pet {
     this.canvas.remove()
   }
 
+  // ── Click / poke detection ─────────────────────────────
+
+  private handleClickDetection(clientX: number, clientY: number): void {
+    // Only count as click if no significant drag movement
+    if (this.dragMoved) return
+
+    this.clickCount++
+
+    // Track pokes (rapid clicks)
+    this.pokeCount++
+    if (this.pokeResetTimer !== null) clearTimeout(this.pokeResetTimer)
+    this.pokeResetTimer = window.setTimeout(() => {
+      this.pokeCount = 0
+      this.pokeResetTimer = null
+    }, 1500) // reset poke count after 1.5s of no pokes
+
+    // Fire poke callback for every click
+    this._onPoke?.(this.pokeCount)
+
+    if (this.clickTimer !== null) {
+      // Second click arrived before timer fired → double click
+      clearTimeout(this.clickTimer)
+      this.clickTimer = null
+      this.clickCount = 0
+      this._onDoubleClick?.()
+    } else {
+      // Start timer; if no second click comes, fire single click
+      this.clickTimer = window.setTimeout(() => {
+        this.clickTimer = null
+        if (this.clickCount === 1) {
+          this._onClick?.()
+        }
+        this.clickCount = 0
+      }, this.CLICK_DELAY)
+    }
+  }
+
   // ── Event handlers ────────────────────────────────────
 
   private handleMouseDown = (e: MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    this.onDragStart(e.clientX, e.clientY)
+    this.startDrag(e.clientX, e.clientY)
     window.addEventListener('mousemove', this.handleMouseMove)
     window.addEventListener('mouseup', this.handleMouseUp)
   }
 
   private handleMouseMove = (e: MouseEvent): void => {
     e.preventDefault()
-    this.onDragMove(e.clientX, e.clientY)
+    this.moveDrag(e.clientX, e.clientY)
   }
 
   private handleMouseUp = (e: MouseEvent): void => {
@@ -220,20 +367,14 @@ export class Pet {
     window.removeEventListener('mousemove', this.handleMouseMove)
     window.removeEventListener('mouseup', this.handleMouseUp)
 
-    // Detect click (no significant movement)
-    const dx = Math.abs(e.clientX - (this.x + this.dragOffsetX))
-    const dy = Math.abs(e.clientY - (this.y + this.dragOffsetY))
-    if (dx < 5 && dy < 5 && this._onClick) {
-      this._onClick()
-    }
-
-    this.onDragEnd()
+    this.handleClickDetection(e.clientX, e.clientY)
+    this.endDrag(e.clientX, e.clientY)
   }
 
   private handleTouchStart = (e: TouchEvent): void => {
     e.preventDefault()
     const touch = e.touches[0]
-    this.onDragStart(touch.clientX, touch.clientY)
+    this.startDrag(touch.clientX, touch.clientY)
     window.addEventListener('touchmove', this.handleTouchMove, { passive: false })
     window.addEventListener('touchend', this.handleTouchEnd)
   }
@@ -241,23 +382,61 @@ export class Pet {
   private handleTouchMove = (e: TouchEvent): void => {
     e.preventDefault()
     const touch = e.touches[0]
-    this.onDragMove(touch.clientX, touch.clientY)
+    this.moveDrag(touch.clientX, touch.clientY)
   }
 
-  private handleTouchEnd = (_e: TouchEvent): void => {
+  private handleTouchEnd = (e: TouchEvent): void => {
     window.removeEventListener('touchmove', this.handleTouchMove)
     window.removeEventListener('touchend', this.handleTouchEnd)
-    this.onDragEnd()
+    // Use last known position for touch end
+    this.handleClickDetection(this.lastDragX, this.lastDragY)
+    this.endDrag(this.lastDragX, this.lastDragY)
   }
 
   private handleResize = (): void => {
     this.groundY = window.innerHeight - GROUND_Y_OFFSET - PET_SIZE
-    // Clamp position to new bounds
     this.x = clamp(this.x, 0, window.innerWidth - PET_SIZE)
-    if (this.y > this.groundY) {
+
+    if (this.surfaceMode === 'on-platform' && this.activePlatform) {
+      // Refresh platform position on resize
+      this.refreshActivePlatform()
+    } else if (this.y > this.groundY) {
       this.y = this.groundY
     }
     this.updateCanvasPosition()
+  }
+
+  // ── Squash / stretch ──────────────────────────────────
+
+  private triggerSquash(): void {
+    this.squashTimer = SQUASH_FRAMES
+    // Impact squash: wide and short
+    this.scaleX = 1.3
+    this.scaleY = 0.7
+  }
+
+  private updateSquash(): void {
+    if (this.squashTimer <= 0) {
+      this.scaleX = 1
+      this.scaleY = 1
+      return
+    }
+    this.squashTimer--
+
+    // Ease back to normal
+    const t = this.squashTimer / SQUASH_FRAMES
+    this.scaleX = 1 + 0.3 * t
+    this.scaleY = 1 - 0.3 * t
+  }
+
+  private updateStretchFromVelocity(): void {
+    if (this.action === 'fall' && !this.dragging) {
+      // Stretch vertically when falling fast
+      const speed = Math.abs(this.velocityY)
+      const stretch = Math.min(STRETCH_FACTOR, speed * 0.03)
+      this.scaleX = 1 - stretch * 0.5
+      this.scaleY = 1 + stretch
+    }
   }
 
   // ── Animation tick (sprite frames) ───────────────────
@@ -272,22 +451,129 @@ export class Pet {
   private physicsTick(): void {
     if (this.dragging) return
 
-    // Gravity / falling
-    if (this.action === 'fall') {
-      this.velocityY += GRAVITY
-      this.y += this.velocityY
-      if (this.y >= this.groundY) {
-        this.y = this.groundY
-        this.velocityY = 0
+    // Squash animation update
+    this.updateSquash()
+
+    // Periodically refresh active platform position from DOM
+    this.platformRefreshCounter++
+    if (this.platformRefreshCounter >= PLATFORM_REFRESH_TICKS) {
+      this.platformRefreshCounter = 0
+      this.refreshActivePlatform()
+    }
+
+    // ── Climbing mode ────────────────────────────────
+    if (this.surfaceMode === 'climbing' && this.activePlatform) {
+      const targetY = this.activePlatform.top - PET_SIZE
+      this.y -= CLIMB_SPEED
+
+      if (this.y <= targetY) {
+        // Reached the top — transition to on-platform
+        this.y = targetY
+        this.surfaceMode = 'on-platform'
         this.action = 'idle'
-        this.behaviorLocked = false
+        this.animFrame = 0
         this.stateTimer = randInt(30, 90)
+        this.behaviorLocked = false
       }
+
       this.updateCanvasPosition()
       return
     }
 
-    // Behavior timer
+    // ── Falling / bouncing ───────────────────────────
+    if (this.action === 'fall' || this.bouncing) {
+      this.velocityY += GRAVITY
+      this.y += this.velocityY
+      this.x += this.velocityX
+
+      // Horizontal friction
+      this.velocityX *= 0.97
+
+      // Bounce off walls
+      if (this.x <= 0) {
+        this.x = 0
+        this.velocityX = Math.abs(this.velocityX) * BOUNCE_DAMPING
+      } else if (this.x >= window.innerWidth - PET_SIZE) {
+        this.x = window.innerWidth - PET_SIZE
+        this.velocityX = -Math.abs(this.velocityX) * BOUNCE_DAMPING
+      }
+
+      // Update direction based on horizontal movement
+      if (Math.abs(this.velocityX) > 0.5) {
+        this.direction = this.velocityX > 0 ? 1 : -1
+      }
+
+      // Stretch while falling
+      this.updateStretchFromVelocity()
+
+      // Check platform landing (only when falling downward)
+      if (this.velocityY > 0 && this.checkPlatformLanding()) {
+        this.updateCanvasPosition()
+        return
+      }
+
+      // Hit ground
+      if (this.y >= this.groundY) {
+        this.y = this.groundY
+        this.surfaceMode = 'ground'
+        this.activePlatform = null
+
+        if (Math.abs(this.velocityY) > BOUNCE_THRESHOLD) {
+          this.velocityY = -this.velocityY * BOUNCE_DAMPING
+          this.bouncing = true
+          this.triggerSquash()
+        } else {
+          this.velocityY = 0
+          this.velocityX = 0
+          this.bouncing = false
+          this.action = 'idle'
+          this.behaviorLocked = false
+          this.stateTimer = randInt(30, 90)
+          this.scaleX = 1
+          this.scaleY = 1
+          this._onDrop?.()
+        }
+      }
+
+      this.updateCanvasPosition()
+      return
+    }
+
+    // ── On-platform walking ──────────────────────────
+    if (this.surfaceMode === 'on-platform' && this.activePlatform) {
+      this.stateTimer--
+      if (this.stateTimer <= 0) {
+        this.behaviorLocked = false
+        this.transitionToNextBehavior()
+      }
+
+      if (this.action === 'walk' || this.action === 'run') {
+        const speed = this.action === 'run' ? RUN_SPEED : WALK_SPEED
+        this.x += speed * this.direction
+        const p = this.activePlatform
+
+        // Fall off edge when center passes platform boundary
+        if (this.x + PET_SIZE * 0.5 < p.left || this.x + PET_SIZE * 0.5 > p.right) {
+          this.surfaceMode = 'ground'
+          this.activePlatform = null
+          this.action = 'fall'
+          this.velocityY = 0
+          this.velocityX = WALK_SPEED * this.direction * 0.5
+          this.behaviorLocked = true
+          this.animFrame = 0
+        }
+      }
+
+      // Keep y aligned with platform top (handles scroll)
+      if (this.activePlatform) {
+        this.y = this.activePlatform.top - PET_SIZE
+      }
+
+      this.updateCanvasPosition()
+      return
+    }
+
+    // ── Normal ground behavior ───────────────────────
     this.stateTimer--
     if (this.stateTimer <= 0) {
       this.behaviorLocked = false
@@ -297,7 +583,6 @@ export class Pet {
     // Movement
     if (this.action === 'walk') {
       this.x += WALK_SPEED * this.direction
-      // Bounce off edges
       if (this.x <= 0) {
         this.x = 0
         this.direction = 1
@@ -316,6 +601,11 @@ export class Pet {
       }
     }
 
+    // Check if arrived at target platform to start climbing
+    if (this.action === 'walk' && this.targetPlatform) {
+      this.checkArrivalAtPlatform()
+    }
+
     // Snap to ground if somehow below
     if (this.y > this.groundY) {
       this.y = this.groundY
@@ -331,8 +621,35 @@ export class Pet {
     const hour = new Date().getHours()
     const isLateNight = hour >= 23 || hour < 6
 
+    // ── On-platform behavior ───────────────────────
+    if (this.surfaceMode === 'on-platform' && this.activePlatform) {
+      if (r < 0.15) {
+        // Jump off the platform
+        this.surfaceMode = 'ground'
+        this.activePlatform = null
+        this.action = 'fall'
+        this.velocityY = 0
+        this.velocityX = (Math.random() < 0.5 ? 1 : -1) * WALK_SPEED
+        this.behaviorLocked = true
+        this.animFrame = 0
+        return
+      } else if (r < 0.5) {
+        this.action = 'idle'
+        this.stateTimer = randInt(60, 180)
+      } else if (r < 0.85) {
+        this.action = 'walk'
+        this.direction = Math.random() < 0.5 ? 1 : -1
+        this.stateTimer = randInt(60, 180)
+      } else {
+        this.action = 'happy'
+        this.stateTimer = randInt(30, 60)
+      }
+      this.animFrame = 0
+      return
+    }
+
+    // ── Egg behavior (no climbing) ─────────────────
     if (this.stage === 'egg') {
-      // Eggs mostly idle, occasionally wiggle (walk)
       if (r < 0.7) {
         this.action = 'idle'
         this.stateTimer = randInt(90, 240)
@@ -340,25 +657,40 @@ export class Pet {
         this.action = 'walk'
         this.stateTimer = randInt(30, 60)
       }
-    } else if (isLateNight && r < 0.4) {
-      // Late at night → sleep more often
+      this.animFrame = 0
+      return
+    }
+
+    // ── Ground behavior with platform seeking ──────
+    // Sometimes try to climb a page element
+    if (this.surfaceMode === 'ground' && this.platforms.length > 0 && r < PLATFORM_SEEK_CHANCE) {
+      const target = this.findReachablePlatform()
+      if (target) {
+        this.targetPlatform = target
+        const platformCenterX = (target.left + target.right) / 2
+        this.direction = platformCenterX > this.x + PET_SIZE / 2 ? 1 : -1
+        this.action = 'walk'
+        this.stateTimer = randInt(120, 360)
+        this.animFrame = 0
+        return
+      }
+    }
+
+    // Normal ground behaviors
+    if (isLateNight && r < 0.4) {
       this.action = 'sleep'
       this.stateTimer = randInt(180, 600)
     } else if (r < 0.45) {
-      // Idle
       this.action = 'idle'
       this.stateTimer = randInt(60, 180)
     } else if (r < 0.85) {
-      // Walk
       this.action = 'walk'
       this.direction = Math.random() < 0.5 ? 1 : -1
       this.stateTimer = randInt(90, 300)
     } else if (r < 0.92) {
-      // Sleep
       this.action = 'sleep'
       this.stateTimer = randInt(120, 300)
     } else {
-      // Random happy moment
       this.action = 'happy'
       this.stateTimer = randInt(30, 60)
     }
@@ -366,19 +698,150 @@ export class Pet {
     this.animFrame = 0
   }
 
+  // ── Platform helpers ─────────────────────────────────
+
+  /** Check if pet lands on a platform during fall */
+  private checkPlatformLanding(): boolean {
+    const petFeetY = this.y + PET_SIZE
+    const petCenterX = this.x + PET_SIZE * 0.5
+
+    for (const p of this.platforms) {
+      // Pet center must overlap platform horizontally
+      if (petCenterX < p.left || petCenterX > p.right) continue
+
+      const landingY = p.top - PET_SIZE
+      // Already too far below platform surface — skip
+      if (this.y > landingY + 8) continue
+      // Feet haven't reached platform top yet
+      if (petFeetY < p.top) continue
+
+      // Land on this platform
+      this.y = landingY
+      this.activePlatform = p
+      this.surfaceMode = 'on-platform'
+
+      if (Math.abs(this.velocityY) > BOUNCE_THRESHOLD) {
+        this.velocityY = -this.velocityY * BOUNCE_DAMPING
+        this.bouncing = true
+        this.triggerSquash()
+      } else {
+        this.velocityY = 0
+        this.velocityX = 0
+        this.bouncing = false
+        this.action = 'idle'
+        this.behaviorLocked = false
+        this.stateTimer = randInt(30, 90)
+        this.scaleX = 1
+        this.scaleY = 1
+        this._onDrop?.()
+      }
+      return true
+    }
+    return false
+  }
+
+  /** Re-read active platform position from DOM */
+  private refreshActivePlatform(): void {
+    if (!this.activePlatform) return
+
+    try {
+      const el = this.activePlatform.el
+      if (!el.isConnected) {
+        this.platformLost()
+        return
+      }
+      const rect = el.getBoundingClientRect()
+      if (rect.bottom < -100 || rect.top > window.innerHeight + 100 || rect.width < PET_SIZE) {
+        this.platformLost()
+        return
+      }
+      this.activePlatform.left = rect.left
+      this.activePlatform.right = rect.right
+      this.activePlatform.top = rect.top
+      this.activePlatform.bottom = rect.bottom
+    } catch {
+      this.platformLost()
+    }
+  }
+
+  /** Handle platform disappearing under the pet */
+  private platformLost(): void {
+    this.surfaceMode = 'ground'
+    this.activePlatform = null
+    this.targetPlatform = null
+    this.action = 'fall'
+    this.velocityY = 0
+    this.behaviorLocked = true
+    this.animFrame = 0
+  }
+
+  /** Check if pet arrived at the target platform and start climbing */
+  private checkArrivalAtPlatform(): void {
+    if (!this.targetPlatform) return
+    const p = this.targetPlatform
+
+    const distToLeft = Math.abs(this.x + PET_SIZE - p.left)
+    const distToRight = Math.abs(this.x - p.right)
+
+    if (distToLeft < 12 || distToRight < 12) {
+      // Start climbing
+      this.activePlatform = this.targetPlatform
+      this.targetPlatform = null
+      this.surfaceMode = 'climbing'
+      this.action = 'climb'
+      this.animFrame = 0
+      this.behaviorLocked = true
+
+      // Position at the closer side of the platform
+      if (distToLeft <= distToRight) {
+        this.climbSide = 'left'
+        this.x = p.left - PET_SIZE + 8
+        this.direction = 1  // face the element
+      } else {
+        this.climbSide = 'right'
+        this.x = p.right - 8
+        this.direction = -1  // face the element
+      }
+
+      // Start climbing from current y (at the bottom area of element)
+      this.y = Math.min(this.y, p.bottom - PET_SIZE)
+    }
+  }
+
+  /** Find a platform the pet can walk to and climb */
+  private findReachablePlatform(): PagePlatform | null {
+    const candidates = this.platforms.filter(p => {
+      if (p === this.activePlatform) return false
+      // Must be in viewport
+      if (p.top < 0 || p.bottom > window.innerHeight) return false
+      // Not too high above current position (within 60% of viewport)
+      if (p.top < window.innerHeight * 0.1) return false
+      return true
+    })
+
+    if (candidates.length === 0) return null
+    return candidates[randInt(0, candidates.length - 1)]
+  }
+
   // ── Rendering ─────────────────────────────────────────
 
   private render(): void {
     const sprite = getSprite(this.stage, this.action, this.animFrame)
     const { pixels, palette, size } = sprite
-    const scale = PET_SIZE / size  // e.g. 64/16 = 4
+    const baseScale = PET_SIZE / size
 
     this.ctx.clearRect(0, 0, PET_SIZE, PET_SIZE)
+
+    // Apply squash/stretch by adjusting draw coordinates
+    const sx = this.scaleX
+    const sy = this.scaleY
+    const offsetX = (1 - sx) * PET_SIZE * 0.5
+    const offsetY = (1 - sy) * PET_SIZE  // anchor at bottom
 
     for (let row = 0; row < size; row++) {
       for (let col = 0; col < size; col++) {
         const colorIdx = pixels[row]?.[col] ?? 0
-        if (colorIdx === 0) continue  // transparent
+        if (colorIdx === 0) continue
 
         const color = palette[colorIdx]
         if (!color || color === 'transparent') continue
@@ -387,11 +850,12 @@ export class Pet {
 
         // Flip horizontally if facing left
         const drawCol = this.direction === -1 ? (size - 1 - col) : col
+
         this.ctx.fillRect(
-          Math.floor(drawCol * scale),
-          Math.floor(row * scale),
-          Math.ceil(scale),
-          Math.ceil(scale),
+          Math.floor(drawCol * baseScale * sx + offsetX),
+          Math.floor(row * baseScale * sy + offsetY),
+          Math.ceil(baseScale * sx),
+          Math.ceil(baseScale * sy),
         )
       }
     }

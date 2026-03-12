@@ -837,12 +837,16 @@
   function clamp(v, min, max) {
     return Math.max(min, Math.min(max, v));
   }
-  function randRange(min, max) {
-    return min + Math.random() * (max - min);
-  }
   function randInt(min, max) {
-    return Math.floor(randRange(min, max + 1));
+    return Math.floor(min + Math.random() * (max - min + 1));
   }
+  var BOUNCE_DAMPING = 0.45;
+  var BOUNCE_THRESHOLD = 2;
+  var SQUASH_FRAMES = 8;
+  var STRETCH_FACTOR = 0.3;
+  var CLIMB_SPEED = WALK_SPEED * 0.6;
+  var PLATFORM_SEEK_CHANCE = 0.15;
+  var PLATFORM_REFRESH_TICKS = 60;
   var Pet = class {
     // DOM
     canvas;
@@ -852,6 +856,8 @@
     x = 200;
     y = 0;
     velocityY = 0;
+    velocityX = 0;
+    // horizontal momentum after throw
     groundY = 0;
     direction = 1;
     // State
@@ -862,15 +868,50 @@
     // frames remaining in current behavior
     behaviorLocked = false;
     // true when action was set externally
+    // Squash/stretch
+    squashTimer = 0;
+    // > 0 while squashing on landing
+    scaleX = 1;
+    // current sprite scale X (for squash/stretch)
+    scaleY = 1;
+    // current sprite scale Y
     // Drag
     dragging = false;
     dragOffsetX = 0;
     dragOffsetY = 0;
+    dragStartX = 0;
+    dragStartY = 0;
+    lastDragX = 0;
+    // for computing throw velocity
+    lastDragY = 0;
+    dragMoved = false;
+    // true if moved > threshold during drag
+    // Click detection
+    clickCount = 0;
+    clickTimer = null;
+    CLICK_DELAY = 250;
+    // ms to wait for double click
+    pokeCount = 0;
+    // rapid poke counter
+    pokeResetTimer = null;
+    // Bounce state
+    bouncing = false;
+    // Platform / climbing
+    surfaceMode = "ground";
+    activePlatform = null;
+    platforms = [];
+    targetPlatform = null;
+    climbSide = "right";
+    platformRefreshCounter = 0;
     // Timers
     animInterval = null;
     physicsInterval = null;
-    // Click callback
+    // Callbacks
     _onClick = null;
+    _onDoubleClick = null;
+    _onPoke = null;
+    _onDragStart = null;
+    _onDrop = null;
     constructor(container) {
       this.container = container;
       this.canvas = document.createElement("canvas");
@@ -903,7 +944,7 @@
     updateState(state) {
       this.stage = state.stage;
       this.direction = state.direction;
-      if (!this.dragging && this.action !== "fall") {
+      if (!this.dragging && this.action !== "fall" && !this.bouncing && this.surfaceMode === "ground") {
         this.x = clamp(state.x, 0, window.innerWidth - PET_SIZE);
       }
       if (!this.behaviorLocked && this.action !== "fall") {
@@ -926,43 +967,93 @@
     getPosition() {
       return { x: this.x, y: this.y };
     }
-    /** Get the canvas element (for event delegation) */
+    /** Get the canvas element */
     getCanvas() {
       return this.canvas;
     }
-    /** Register click handler */
+    /** Set available page platforms for climbing/standing */
+    setPlatforms(platforms) {
+      this.platforms = platforms;
+    }
+    /** Register single click handler */
     onClick(cb) {
       this._onClick = cb;
     }
+    /** Register double click handler */
+    onDoubleClick(cb) {
+      this._onDoubleClick = cb;
+    }
+    /** Register poke handler (called with poke count) */
+    onPoke(cb) {
+      this._onPoke = cb;
+    }
+    /** Register drag start handler */
+    onDragStartCallback(cb) {
+      this._onDragStart = cb;
+    }
+    /** Register drop handler (called when pet lands after being dropped) */
+    onDrop(cb) {
+      this._onDrop = cb;
+    }
     // ── Drag handling ─────────────────────────────────────
-    onDragStart(clientX, clientY) {
+    startDrag(clientX, clientY) {
       this.dragging = true;
       this.dragOffsetX = clientX - this.x;
       this.dragOffsetY = clientY - this.y;
+      this.dragStartX = clientX;
+      this.dragStartY = clientY;
+      this.lastDragX = clientX;
+      this.lastDragY = clientY;
+      this.dragMoved = false;
       this.canvas.style.cursor = "grabbing";
       this.velocityY = 0;
+      this.velocityX = 0;
+      this.bouncing = false;
+      this.surfaceMode = "ground";
+      this.activePlatform = null;
+      this.targetPlatform = null;
+      this.action = "fall";
+      this.animFrame = 0;
+      this.behaviorLocked = true;
     }
-    onDragMove(clientX, clientY) {
+    moveDrag(clientX, clientY) {
       if (!this.dragging) return;
+      this.lastDragX = clientX;
+      this.lastDragY = clientY;
       this.x = clientX - this.dragOffsetX;
       this.y = clientY - this.dragOffsetY;
+      const dx = Math.abs(clientX - this.dragStartX);
+      const dy = Math.abs(clientY - this.dragStartY);
+      if (dx > 8 || dy > 8) {
+        this.dragMoved = true;
+      }
       this.updateCanvasPosition();
     }
-    onDragEnd() {
+    endDrag(clientX, clientY) {
       if (!this.dragging) return;
       this.dragging = false;
       this.canvas.style.cursor = "grab";
+      const throwVX = (clientX - this.dragStartX) * 0.15;
+      const throwVY = (clientY - this.dragStartY) * 0.1;
       if (this.y < this.groundY) {
         this.action = "fall";
         this.animFrame = 0;
-        this.velocityY = 0;
+        this.velocityY = Math.max(throwVY, 0);
+        this.velocityX = clamp(throwVX, -8, 8);
         this.behaviorLocked = true;
+        this._onDragStart?.();
+      } else {
+        this.triggerSquash();
+        this.behaviorLocked = false;
+        this.stateTimer = randInt(30, 90);
       }
     }
     /** Cleanup all intervals and DOM */
     destroy() {
       if (this.animInterval !== null) clearInterval(this.animInterval);
       if (this.physicsInterval !== null) clearInterval(this.physicsInterval);
+      if (this.clickTimer !== null) clearTimeout(this.clickTimer);
+      if (this.pokeResetTimer !== null) clearTimeout(this.pokeResetTimer);
       this.canvas.removeEventListener("mousedown", this.handleMouseDown);
       this.canvas.removeEventListener("touchstart", this.handleTouchStart);
       window.removeEventListener("mousemove", this.handleMouseMove);
@@ -972,54 +1063,104 @@
       window.removeEventListener("resize", this.handleResize);
       this.canvas.remove();
     }
+    // ── Click / poke detection ─────────────────────────────
+    handleClickDetection(clientX, clientY) {
+      if (this.dragMoved) return;
+      this.clickCount++;
+      this.pokeCount++;
+      if (this.pokeResetTimer !== null) clearTimeout(this.pokeResetTimer);
+      this.pokeResetTimer = window.setTimeout(() => {
+        this.pokeCount = 0;
+        this.pokeResetTimer = null;
+      }, 1500);
+      this._onPoke?.(this.pokeCount);
+      if (this.clickTimer !== null) {
+        clearTimeout(this.clickTimer);
+        this.clickTimer = null;
+        this.clickCount = 0;
+        this._onDoubleClick?.();
+      } else {
+        this.clickTimer = window.setTimeout(() => {
+          this.clickTimer = null;
+          if (this.clickCount === 1) {
+            this._onClick?.();
+          }
+          this.clickCount = 0;
+        }, this.CLICK_DELAY);
+      }
+    }
     // ── Event handlers ────────────────────────────────────
     handleMouseDown = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this.onDragStart(e.clientX, e.clientY);
+      this.startDrag(e.clientX, e.clientY);
       window.addEventListener("mousemove", this.handleMouseMove);
       window.addEventListener("mouseup", this.handleMouseUp);
     };
     handleMouseMove = (e) => {
       e.preventDefault();
-      this.onDragMove(e.clientX, e.clientY);
+      this.moveDrag(e.clientX, e.clientY);
     };
     handleMouseUp = (e) => {
       e.preventDefault();
       window.removeEventListener("mousemove", this.handleMouseMove);
       window.removeEventListener("mouseup", this.handleMouseUp);
-      const dx = Math.abs(e.clientX - (this.x + this.dragOffsetX));
-      const dy = Math.abs(e.clientY - (this.y + this.dragOffsetY));
-      if (dx < 5 && dy < 5 && this._onClick) {
-        this._onClick();
-      }
-      this.onDragEnd();
+      this.handleClickDetection(e.clientX, e.clientY);
+      this.endDrag(e.clientX, e.clientY);
     };
     handleTouchStart = (e) => {
       e.preventDefault();
       const touch = e.touches[0];
-      this.onDragStart(touch.clientX, touch.clientY);
+      this.startDrag(touch.clientX, touch.clientY);
       window.addEventListener("touchmove", this.handleTouchMove, { passive: false });
       window.addEventListener("touchend", this.handleTouchEnd);
     };
     handleTouchMove = (e) => {
       e.preventDefault();
       const touch = e.touches[0];
-      this.onDragMove(touch.clientX, touch.clientY);
+      this.moveDrag(touch.clientX, touch.clientY);
     };
-    handleTouchEnd = (_e) => {
+    handleTouchEnd = (e) => {
       window.removeEventListener("touchmove", this.handleTouchMove);
       window.removeEventListener("touchend", this.handleTouchEnd);
-      this.onDragEnd();
+      this.handleClickDetection(this.lastDragX, this.lastDragY);
+      this.endDrag(this.lastDragX, this.lastDragY);
     };
     handleResize = () => {
       this.groundY = window.innerHeight - GROUND_Y_OFFSET - PET_SIZE;
       this.x = clamp(this.x, 0, window.innerWidth - PET_SIZE);
-      if (this.y > this.groundY) {
+      if (this.surfaceMode === "on-platform" && this.activePlatform) {
+        this.refreshActivePlatform();
+      } else if (this.y > this.groundY) {
         this.y = this.groundY;
       }
       this.updateCanvasPosition();
     };
+    // ── Squash / stretch ──────────────────────────────────
+    triggerSquash() {
+      this.squashTimer = SQUASH_FRAMES;
+      this.scaleX = 1.3;
+      this.scaleY = 0.7;
+    }
+    updateSquash() {
+      if (this.squashTimer <= 0) {
+        this.scaleX = 1;
+        this.scaleY = 1;
+        return;
+      }
+      this.squashTimer--;
+      const t2 = this.squashTimer / SQUASH_FRAMES;
+      this.scaleX = 1 + 0.3 * t2;
+      this.scaleY = 1 - 0.3 * t2;
+    }
+    updateStretchFromVelocity() {
+      if (this.action === "fall" && !this.dragging) {
+        const speed = Math.abs(this.velocityY);
+        const stretch = Math.min(STRETCH_FACTOR, speed * 0.03);
+        this.scaleX = 1 - stretch * 0.5;
+        this.scaleY = 1 + stretch;
+      }
+    }
     // ── Animation tick (sprite frames) ───────────────────
     animTick() {
       this.animFrame++;
@@ -1028,15 +1169,91 @@
     // ── Physics tick (movement, gravity, behavior) ────────
     physicsTick() {
       if (this.dragging) return;
-      if (this.action === "fall") {
+      this.updateSquash();
+      this.platformRefreshCounter++;
+      if (this.platformRefreshCounter >= PLATFORM_REFRESH_TICKS) {
+        this.platformRefreshCounter = 0;
+        this.refreshActivePlatform();
+      }
+      if (this.surfaceMode === "climbing" && this.activePlatform) {
+        const targetY = this.activePlatform.top - PET_SIZE;
+        this.y -= CLIMB_SPEED;
+        if (this.y <= targetY) {
+          this.y = targetY;
+          this.surfaceMode = "on-platform";
+          this.action = "idle";
+          this.animFrame = 0;
+          this.stateTimer = randInt(30, 90);
+          this.behaviorLocked = false;
+        }
+        this.updateCanvasPosition();
+        return;
+      }
+      if (this.action === "fall" || this.bouncing) {
         this.velocityY += GRAVITY;
         this.y += this.velocityY;
+        this.x += this.velocityX;
+        this.velocityX *= 0.97;
+        if (this.x <= 0) {
+          this.x = 0;
+          this.velocityX = Math.abs(this.velocityX) * BOUNCE_DAMPING;
+        } else if (this.x >= window.innerWidth - PET_SIZE) {
+          this.x = window.innerWidth - PET_SIZE;
+          this.velocityX = -Math.abs(this.velocityX) * BOUNCE_DAMPING;
+        }
+        if (Math.abs(this.velocityX) > 0.5) {
+          this.direction = this.velocityX > 0 ? 1 : -1;
+        }
+        this.updateStretchFromVelocity();
+        if (this.velocityY > 0 && this.checkPlatformLanding()) {
+          this.updateCanvasPosition();
+          return;
+        }
         if (this.y >= this.groundY) {
           this.y = this.groundY;
-          this.velocityY = 0;
-          this.action = "idle";
+          this.surfaceMode = "ground";
+          this.activePlatform = null;
+          if (Math.abs(this.velocityY) > BOUNCE_THRESHOLD) {
+            this.velocityY = -this.velocityY * BOUNCE_DAMPING;
+            this.bouncing = true;
+            this.triggerSquash();
+          } else {
+            this.velocityY = 0;
+            this.velocityX = 0;
+            this.bouncing = false;
+            this.action = "idle";
+            this.behaviorLocked = false;
+            this.stateTimer = randInt(30, 90);
+            this.scaleX = 1;
+            this.scaleY = 1;
+            this._onDrop?.();
+          }
+        }
+        this.updateCanvasPosition();
+        return;
+      }
+      if (this.surfaceMode === "on-platform" && this.activePlatform) {
+        this.stateTimer--;
+        if (this.stateTimer <= 0) {
           this.behaviorLocked = false;
-          this.stateTimer = randInt(30, 90);
+          this.transitionToNextBehavior();
+        }
+        if (this.action === "walk" || this.action === "run") {
+          const speed = this.action === "run" ? RUN_SPEED : WALK_SPEED;
+          this.x += speed * this.direction;
+          const p = this.activePlatform;
+          if (this.x + PET_SIZE * 0.5 < p.left || this.x + PET_SIZE * 0.5 > p.right) {
+            this.surfaceMode = "ground";
+            this.activePlatform = null;
+            this.action = "fall";
+            this.velocityY = 0;
+            this.velocityX = WALK_SPEED * this.direction * 0.5;
+            this.behaviorLocked = true;
+            this.animFrame = 0;
+          }
+        }
+        if (this.activePlatform) {
+          this.y = this.activePlatform.top - PET_SIZE;
         }
         this.updateCanvasPosition();
         return;
@@ -1065,6 +1282,9 @@
           this.direction = -1;
         }
       }
+      if (this.action === "walk" && this.targetPlatform) {
+        this.checkArrivalAtPlatform();
+      }
       if (this.y > this.groundY) {
         this.y = this.groundY;
       }
@@ -1075,6 +1295,30 @@
       const r = Math.random();
       const hour = (/* @__PURE__ */ new Date()).getHours();
       const isLateNight = hour >= 23 || hour < 6;
+      if (this.surfaceMode === "on-platform" && this.activePlatform) {
+        if (r < 0.15) {
+          this.surfaceMode = "ground";
+          this.activePlatform = null;
+          this.action = "fall";
+          this.velocityY = 0;
+          this.velocityX = (Math.random() < 0.5 ? 1 : -1) * WALK_SPEED;
+          this.behaviorLocked = true;
+          this.animFrame = 0;
+          return;
+        } else if (r < 0.5) {
+          this.action = "idle";
+          this.stateTimer = randInt(60, 180);
+        } else if (r < 0.85) {
+          this.action = "walk";
+          this.direction = Math.random() < 0.5 ? 1 : -1;
+          this.stateTimer = randInt(60, 180);
+        } else {
+          this.action = "happy";
+          this.stateTimer = randInt(30, 60);
+        }
+        this.animFrame = 0;
+        return;
+      }
       if (this.stage === "egg") {
         if (r < 0.7) {
           this.action = "idle";
@@ -1083,7 +1327,22 @@
           this.action = "walk";
           this.stateTimer = randInt(30, 60);
         }
-      } else if (isLateNight && r < 0.4) {
+        this.animFrame = 0;
+        return;
+      }
+      if (this.surfaceMode === "ground" && this.platforms.length > 0 && r < PLATFORM_SEEK_CHANCE) {
+        const target = this.findReachablePlatform();
+        if (target) {
+          this.targetPlatform = target;
+          const platformCenterX = (target.left + target.right) / 2;
+          this.direction = platformCenterX > this.x + PET_SIZE / 2 ? 1 : -1;
+          this.action = "walk";
+          this.stateTimer = randInt(120, 360);
+          this.animFrame = 0;
+          return;
+        }
+      }
+      if (isLateNight && r < 0.4) {
         this.action = "sleep";
         this.stateTimer = randInt(180, 600);
       } else if (r < 0.45) {
@@ -1102,12 +1361,116 @@
       }
       this.animFrame = 0;
     }
+    // ── Platform helpers ─────────────────────────────────
+    /** Check if pet lands on a platform during fall */
+    checkPlatformLanding() {
+      const petFeetY = this.y + PET_SIZE;
+      const petCenterX = this.x + PET_SIZE * 0.5;
+      for (const p of this.platforms) {
+        if (petCenterX < p.left || petCenterX > p.right) continue;
+        const landingY = p.top - PET_SIZE;
+        if (this.y > landingY + 8) continue;
+        if (petFeetY < p.top) continue;
+        this.y = landingY;
+        this.activePlatform = p;
+        this.surfaceMode = "on-platform";
+        if (Math.abs(this.velocityY) > BOUNCE_THRESHOLD) {
+          this.velocityY = -this.velocityY * BOUNCE_DAMPING;
+          this.bouncing = true;
+          this.triggerSquash();
+        } else {
+          this.velocityY = 0;
+          this.velocityX = 0;
+          this.bouncing = false;
+          this.action = "idle";
+          this.behaviorLocked = false;
+          this.stateTimer = randInt(30, 90);
+          this.scaleX = 1;
+          this.scaleY = 1;
+          this._onDrop?.();
+        }
+        return true;
+      }
+      return false;
+    }
+    /** Re-read active platform position from DOM */
+    refreshActivePlatform() {
+      if (!this.activePlatform) return;
+      try {
+        const el = this.activePlatform.el;
+        if (!el.isConnected) {
+          this.platformLost();
+          return;
+        }
+        const rect = el.getBoundingClientRect();
+        if (rect.bottom < -100 || rect.top > window.innerHeight + 100 || rect.width < PET_SIZE) {
+          this.platformLost();
+          return;
+        }
+        this.activePlatform.left = rect.left;
+        this.activePlatform.right = rect.right;
+        this.activePlatform.top = rect.top;
+        this.activePlatform.bottom = rect.bottom;
+      } catch {
+        this.platformLost();
+      }
+    }
+    /** Handle platform disappearing under the pet */
+    platformLost() {
+      this.surfaceMode = "ground";
+      this.activePlatform = null;
+      this.targetPlatform = null;
+      this.action = "fall";
+      this.velocityY = 0;
+      this.behaviorLocked = true;
+      this.animFrame = 0;
+    }
+    /** Check if pet arrived at the target platform and start climbing */
+    checkArrivalAtPlatform() {
+      if (!this.targetPlatform) return;
+      const p = this.targetPlatform;
+      const distToLeft = Math.abs(this.x + PET_SIZE - p.left);
+      const distToRight = Math.abs(this.x - p.right);
+      if (distToLeft < 12 || distToRight < 12) {
+        this.activePlatform = this.targetPlatform;
+        this.targetPlatform = null;
+        this.surfaceMode = "climbing";
+        this.action = "climb";
+        this.animFrame = 0;
+        this.behaviorLocked = true;
+        if (distToLeft <= distToRight) {
+          this.climbSide = "left";
+          this.x = p.left - PET_SIZE + 8;
+          this.direction = 1;
+        } else {
+          this.climbSide = "right";
+          this.x = p.right - 8;
+          this.direction = -1;
+        }
+        this.y = Math.min(this.y, p.bottom - PET_SIZE);
+      }
+    }
+    /** Find a platform the pet can walk to and climb */
+    findReachablePlatform() {
+      const candidates = this.platforms.filter((p) => {
+        if (p === this.activePlatform) return false;
+        if (p.top < 0 || p.bottom > window.innerHeight) return false;
+        if (p.top < window.innerHeight * 0.1) return false;
+        return true;
+      });
+      if (candidates.length === 0) return null;
+      return candidates[randInt(0, candidates.length - 1)];
+    }
     // ── Rendering ─────────────────────────────────────────
     render() {
       const sprite = getSprite(this.stage, this.action, this.animFrame);
       const { pixels, palette, size } = sprite;
-      const scale = PET_SIZE / size;
+      const baseScale = PET_SIZE / size;
       this.ctx.clearRect(0, 0, PET_SIZE, PET_SIZE);
+      const sx = this.scaleX;
+      const sy = this.scaleY;
+      const offsetX = (1 - sx) * PET_SIZE * 0.5;
+      const offsetY = (1 - sy) * PET_SIZE;
       for (let row = 0; row < size; row++) {
         for (let col = 0; col < size; col++) {
           const colorIdx = pixels[row]?.[col] ?? 0;
@@ -1117,10 +1480,10 @@
           this.ctx.fillStyle = color;
           const drawCol = this.direction === -1 ? size - 1 - col : col;
           this.ctx.fillRect(
-            Math.floor(drawCol * scale),
-            Math.floor(row * scale),
-            Math.ceil(scale),
-            Math.ceil(scale)
+            Math.floor(drawCol * baseScale * sx + offsetX),
+            Math.floor(row * baseScale * sy + offsetY),
+            Math.ceil(baseScale * sx),
+            Math.ceil(baseScale * sy)
           );
         }
       }
@@ -1130,6 +1493,48 @@
       this.canvas.style.top = `${Math.round(this.y)}px`;
     }
   };
+
+  // src/shared/i18n.ts
+  var S = {
+    // Pet speech
+    yummy: { zh: "\u597D\u5403\uFF01", en: "Yummy!" },
+    connectionFailed: { zh: "\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5", en: "Connection failed, please retry" },
+    bored: { zh: "\u597D\u65E0\u804A\uFF5E", en: "I'm bored~" },
+    sleepy: { zh: "\u56F0\u4E86...", en: "Sleepy..." },
+    hungry: { zh: "\u809A\u5B50\u997F\u4E86...", en: "I'm hungry..." },
+    happy: { zh: "\u5F00\u5FC3\uFF01", en: "Happy!" },
+    missYou: { zh: "\u4F60\u53BB\u54EA\u4E86\uFF1F", en: "Where did you go?" },
+    helloThere: { zh: "\u4F60\u597D\u5440\uFF01", en: "Hello!" },
+    ouch: { zh: "\u54CE\u54DF\uFF01", en: "Ouch!" },
+    whee: { zh: "\u545C\u54C7\uFF5E", en: "Whee~" },
+    dizzy: { zh: "\u5934\u6655...", en: "Dizzy..." },
+    stopIt: { zh: "\u522B\u6233\u4E86\u5566\uFF01", en: "Stop poking!" },
+    whatUp: { zh: "\u600E\u4E48\u4E86\uFF1F", en: "What's up?" },
+    petMe: { zh: "\u6478\u6478\u6211~", en: "Pet me~" },
+    // Chat panel
+    feed: { zh: "\u{1F356} \u5582\u98DF", en: "\u{1F356} Feed" },
+    status: { zh: "\u{1F4CA} \u72B6\u6001", en: "\u{1F4CA} Status" },
+    sendBtn: { zh: "\u53D1\u9001", en: "Send" },
+    inputPlaceholder: { zh: "\u8BF4\u70B9\u4EC0\u4E48...", en: "Say something..." },
+    // Status display
+    labelStage: { zh: "\u9636\u6BB5", en: "Stage" },
+    labelXP: { zh: "\u7ECF\u9A8C", en: "XP" },
+    labelHunger: { zh: "\u9965\u997F", en: "Hunger" },
+    labelMood: { zh: "\u5FC3\u60C5", en: "Mood" },
+    labelEnergy: { zh: "\u4F53\u529B", en: "Energy" },
+    labelDays: { zh: "\u5929\u6570", en: "Days" }
+  };
+  var _lang = "en";
+  function setLang(lang) {
+    if (lang === "auto") {
+      _lang = typeof navigator !== "undefined" && navigator.language.startsWith("zh") ? "zh" : "en";
+    } else {
+      _lang = lang;
+    }
+  }
+  function t(key) {
+    return S[key][_lang];
+  }
 
   // src/content/chat.ts
   var SHADOW_STYLES = `
@@ -1346,6 +1751,9 @@
     petStage = "egg";
     nameEl;
     stageEl;
+    // Cached action buttons for i18n updates
+    feedBtn;
+    statusBtn;
     // Streaming
     streamingMsgEl = null;
     // Callbacks
@@ -1394,21 +1802,28 @@
       });
       const closeBtn = this.panelEl.querySelector(".close-btn");
       closeBtn.addEventListener("click", () => this.toggle());
-      const feedBtn = this.panelEl.querySelector('[data-action="feed"]');
-      feedBtn.addEventListener("click", () => {
+      this.feedBtn = this.panelEl.querySelector('[data-action="feed"]');
+      this.feedBtn.addEventListener("click", () => {
         if (this._onFeed) this._onFeed();
       });
-      const statusBtn = this.panelEl.querySelector('[data-action="status"]');
-      statusBtn.addEventListener("click", () => {
+      this.statusBtn = this.panelEl.querySelector('[data-action="status"]');
+      this.statusBtn.addEventListener("click", () => {
         if (this._onStatus) this._onStatus();
       });
       this.panelEl.addEventListener("mousedown", (e) => e.stopPropagation());
       this.panelEl.addEventListener("touchstart", (e) => e.stopPropagation());
-      this.panelEl.addEventListener("keydown", (e) => e.stopPropagation(), true);
-      this.panelEl.addEventListener("keyup", (e) => e.stopPropagation(), true);
-      this.panelEl.addEventListener("keypress", (e) => e.stopPropagation(), true);
+      this.panelEl.addEventListener("keydown", (e) => e.stopPropagation());
+      this.panelEl.addEventListener("keyup", (e) => e.stopPropagation());
+      this.panelEl.addEventListener("keypress", (e) => e.stopPropagation());
     }
     // ── Public API ──────────────────────────────────────
+    /** Update all UI text to match current i18n language */
+    updateLanguage() {
+      this.feedBtn.textContent = t("feed");
+      this.statusBtn.textContent = t("status");
+      this.sendBtn.textContent = t("sendBtn");
+      this.inputEl.placeholder = t("inputPlaceholder");
+    }
     /** Update pet info shown in the header */
     updatePetInfo(name, stage) {
       this.petName = name;
@@ -1512,7 +1927,141 @@
     }
   };
 
+  // src/content/elements.ts
+  var MIN_PLATFORM_WIDTH = PET_SIZE;
+  var MIN_PLATFORM_HEIGHT = 16;
+  var MAX_PLATFORMS = 15;
+  var SCAN_COOLDOWN = 2500;
+  function isInViewport(rect) {
+    return rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth;
+  }
+  function isVisible(style) {
+    return style.display !== "none" && style.visibility !== "hidden" && parseFloat(style.opacity) > 0.1;
+  }
+  function hasVisualPresence(style) {
+    const bg = style.backgroundColor;
+    const hasBg = bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent";
+    const hasBorder = parseFloat(style.borderWidth) > 0 && style.borderStyle !== "none";
+    const hasShadow = style.boxShadow !== "none" && style.boxShadow !== "";
+    const hasBgImage = style.backgroundImage !== "none";
+    return hasBg || hasBorder || hasShadow || hasBgImage;
+  }
+  var ElementScanner = class {
+    cached = [];
+    lastScan = 0;
+    /** Get current platforms (uses cache if fresh enough) */
+    getPlatforms() {
+      const now = Date.now();
+      if (now - this.lastScan < SCAN_COOLDOWN) return this.cached;
+      this.lastScan = now;
+      this.cached = this.scan();
+      return this.cached;
+    }
+    /** Refresh a specific platform's position from its DOM element */
+    static refresh(p) {
+      try {
+        if (!p.el.isConnected) return null;
+        const rect = p.el.getBoundingClientRect();
+        if (rect.bottom < -100 || rect.top > window.innerHeight + 100) return null;
+        if (rect.width < MIN_PLATFORM_WIDTH) return null;
+        p.left = rect.left;
+        p.right = rect.right;
+        p.top = rect.top;
+        p.bottom = rect.bottom;
+        return p;
+      } catch {
+        return null;
+      }
+    }
+    // ── Internal scan ──────────────────────────────────────
+    scan() {
+      const results = [];
+      const petContainer = document.getElementById("petclaw-container");
+      const structural = 'img, video, iframe, canvas:not([style*="petclaw"]), nav, header, footer, figure, pre, table, hr, [role="navigation"], [role="banner"]';
+      for (const el of document.querySelectorAll(structural)) {
+        if (petContainer?.contains(el)) continue;
+        const p = this.check(el);
+        if (p) results.push(p);
+      }
+      for (const el of document.querySelectorAll("h1, h2, h3")) {
+        if (petContainer?.contains(el)) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.height < 24) continue;
+        const p = this.check(el);
+        if (p) results.push(p);
+      }
+      for (const el of document.querySelectorAll("div, section, article, aside, main, form, ul, ol, blockquote, details")) {
+        if (petContainer?.contains(el)) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 100 || rect.height < 40) continue;
+        if (!isInViewport(rect)) continue;
+        const style = getComputedStyle(el);
+        if (!isVisible(style)) continue;
+        if (!hasVisualPresence(style)) continue;
+        results.push({
+          el,
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom
+        });
+      }
+      for (const el of document.querySelectorAll('button, [role="button"], a.btn, a.button, input[type="submit"]')) {
+        if (petContainer?.contains(el)) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < PET_SIZE || rect.height < 16) continue;
+        if (!isInViewport(rect)) continue;
+        const style = getComputedStyle(el);
+        if (!isVisible(style)) continue;
+        results.push({
+          el,
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom
+        });
+      }
+      const unique = this.deduplicate(results);
+      unique.sort((a, b) => a.top - b.top);
+      return unique.slice(0, MAX_PLATFORMS);
+    }
+    check(el) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < MIN_PLATFORM_WIDTH || rect.height < MIN_PLATFORM_HEIGHT) return null;
+      if (!isInViewport(rect)) return null;
+      try {
+        const style = getComputedStyle(el);
+        if (!isVisible(style)) return null;
+      } catch {
+        return null;
+      }
+      return {
+        el,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom
+      };
+    }
+    deduplicate(platforms) {
+      const keep = [];
+      for (const p of platforms) {
+        const isDupe = keep.some((k) => {
+          const overlapX = Math.max(0, Math.min(k.right, p.right) - Math.max(k.left, p.left));
+          const overlapY = Math.max(0, Math.min(k.bottom, p.bottom) - Math.max(k.top, p.top));
+          const overlapArea = overlapX * overlapY;
+          const pArea = (p.right - p.left) * (p.bottom - p.top);
+          return overlapArea > pArea * 0.7;
+        });
+        if (!isDupe) keep.push(p);
+      }
+      return keep;
+    }
+  };
+
   // src/content/index.ts
+  var ACTIVE_INSTANCE_KEY = "petclawActiveInstance";
+  var SHUTDOWN_EVENT = "petclaw:shutdown";
   window.addEventListener("unhandledrejection", (e) => {
     const msg = e.reason?.message || String(e.reason || "");
     if (msg.includes("Extension context invalidated")) {
@@ -1524,8 +2073,6 @@
       e.preventDefault();
     }
   });
-  var ACTIVE_INSTANCE_KEY = "petclawActiveInstance";
-  var SHUTDOWN_EVENT = "petclaw:shutdown";
   {
     document.dispatchEvent(new CustomEvent(SHUTDOWN_EVENT, {
       detail: { reason: "reinitialize" }
@@ -1567,6 +2114,7 @@
         clearInterval(syncTimer);
         syncTimer = null;
       }
+      clearInterval(platformScanTimer);
       document.removeEventListener(SHUTDOWN_EVENT, handleShutdown);
       window.removeEventListener("pagehide", handlePageHide);
       try {
@@ -1604,6 +2152,27 @@
     shadowRoot.appendChild(innerWrapper);
     const pet = new Pet(innerWrapper);
     const chatUI = new ChatUI(shadowRoot, pet);
+    const elementScanner = new ElementScanner();
+    const platformScanTimer = setInterval(() => {
+      if (!isInstanceAlive()) return;
+      try {
+        const platforms = elementScanner.getPlatforms();
+        pet.setPlatforms(platforms);
+      } catch {
+      }
+    }, 3e3);
+    let scrollDebounce = null;
+    window.addEventListener("scroll", () => {
+      if (scrollDebounce) clearTimeout(scrollDebounce);
+      scrollDebounce = setTimeout(() => {
+        if (!isInstanceAlive()) return;
+        try {
+          const platforms = elementScanner.getPlatforms();
+          pet.setPlatforms(platforms);
+        } catch {
+        }
+      }, 500);
+    }, { passive: true });
     function getErrorMessage(err) {
       return err instanceof Error ? err.message : String(err);
     }
@@ -1670,6 +2239,10 @@
         if (response.ok && response.state) {
           handleStateUpdate(response.state);
         }
+        if (response.ok && response.settings) {
+          setLang(response.settings.language);
+          chatUI.updateLanguage();
+        }
       } catch (err) {
         console.error("[PetClaw] Init failed:", err);
       }
@@ -1687,18 +2260,49 @@
       chatUI.toggle();
       void sendToBackground({ type: "PET_INTERACTION", action: "click" });
     });
+    pet.onDoubleClick(() => {
+      if (!isInstanceAlive()) return;
+      if (!chatUI.panelOpen) chatUI.toggle();
+      chatUI.showBubble(t("whatUp"));
+      pet.setAction("happy");
+      void sendToBackground({ type: "PET_INTERACTION", action: "doubleclick" });
+    });
+    pet.onPoke((count) => {
+      if (!isInstanceAlive()) return;
+      if (count === 1) {
+        pet.setAction("idle");
+      } else if (count === 2) {
+        chatUI.showBubble(t("petMe"));
+        pet.setAction("happy");
+      } else if (count >= 5) {
+        chatUI.showBubble(t("stopIt"));
+        pet.setAction("sad");
+      } else if (count >= 3) {
+        chatUI.showBubble(t("ouch"));
+      }
+      void sendToBackground({ type: "PET_INTERACTION", action: "poke" });
+    });
+    pet.onDragStartCallback(() => {
+      if (!isInstanceAlive()) return;
+      chatUI.showBubble(t("whee"));
+    });
+    pet.onDrop(() => {
+      if (!isInstanceAlive()) return;
+      chatUI.showBubble(t("dizzy"));
+      void sendToBackground({ type: "PET_INTERACTION", action: "drop" });
+    });
     chatUI.onSend(async (text) => {
       if (!isInstanceAlive()) return;
       try {
         chatUI.startStreamingMessage();
         const response = await sendToBackground({ type: "CHAT", text });
         if (!response.ok) {
-          chatUI.finishStreaming(response.error || "\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+          chatUI.finishStreaming(response.error || t("connectionFailed"));
         }
       } catch (err) {
         teardown();
         console.error("[PetClaw] Chat failed:", err);
-        chatUI.finishStreaming("\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+        chatUI.finishStreaming(t("connectionFailed"));
       }
     });
     chatUI.onFeed(async () => {
@@ -1708,7 +2312,7 @@
         if (response.ok && response.state) {
           handleStateUpdate(response.state);
           pet.setAction("eat");
-          chatUI.showBubble("\u597D\u5403\uFF01");
+          chatUI.showBubble(t("yummy"));
         }
       } catch (err) {
         teardown();
@@ -1723,9 +2327,9 @@
           const s = response.state;
           const statusText = [
             `\u{1F99E} ${s.name}`,
-            `\u9636\u6BB5: ${s.stage} | XP: ${s.experience}`,
-            `\u9965\u997F: ${s.hunger} | \u5FC3\u60C5: ${s.happiness} | \u4F53\u529B: ${s.energy}`,
-            `\u5929\u6570: ${s.daysActive}`
+            `${t("labelStage")}: ${s.stage} | ${t("labelXP")}: ${s.experience}`,
+            `${t("labelHunger")}: ${s.hunger} | ${t("labelMood")}: ${s.happiness} | ${t("labelEnergy")}: ${s.energy}`,
+            `${t("labelDays")}: ${s.daysActive}`
           ].join("\n");
           chatUI.appendMessage("pet", statusText);
         }

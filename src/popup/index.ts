@@ -233,13 +233,27 @@ $('btn-export').addEventListener('click', async () => {
   downloadFile('SOUL.md', data.soul)
   downloadFile('MEMORY.md', data.memory)
   downloadFile('USER.md', data.user)
-  downloadFile('ID.md', data.id)
+  downloadFile('IDENTITY.md', data.id)
 })
+
+// ── Preview tabs ──────────────────────────────────────────
+
+let currentPreview: keyof ExportData = 'soul'
+
+const previewFiles: Array<{ key: keyof ExportData; label: string }> = [
+  { key: 'soul', label: 'SOUL.md' },
+  { key: 'memory', label: 'MEMORY.md' },
+  { key: 'user', label: 'USER.md' },
+  { key: 'id', label: 'IDENTITY.md' },
+]
 
 $('btn-preview').addEventListener('click', async () => {
   const box = $('preview-box')
+  const tabs = $('preview-tabs')
+
   if (box.classList.contains('visible')) {
     box.classList.remove('visible')
+    tabs.classList.remove('visible')
     return
   }
 
@@ -250,8 +264,25 @@ $('btn-preview').addEventListener('click', async () => {
     return
   }
 
-  box.textContent = res.exportData.soul
+  // Build preview tabs
+  tabs.innerHTML = previewFiles.map(f =>
+    `<button class="preview-tab${f.key === currentPreview ? ' active' : ''}" data-key="${f.key}">${f.label}</button>`
+  ).join('')
+  tabs.classList.add('visible')
+
+  // Show current file
+  box.textContent = res.exportData[currentPreview]
   box.classList.add('visible')
+
+  // Tab click handlers
+  tabs.querySelectorAll('.preview-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentPreview = (btn as HTMLElement).dataset.key as keyof ExportData
+      tabs.querySelectorAll('.preview-tab').forEach(b => b.classList.remove('active'))
+      btn.classList.add('active')
+      box.textContent = res.exportData![currentPreview]
+    })
+  })
 })
 
 function downloadFile(filename: string, content: string) {

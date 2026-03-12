@@ -8,6 +8,7 @@
 import type { Pet } from './pet'
 import { BUBBLE_DURATION, STAGE_NAMES } from '../shared/constants'
 import type { PetStage } from '../shared/types'
+import { t } from '../shared/i18n'
 
 // ── Styles (injected into Shadow DOM) ───────────────────
 
@@ -232,6 +233,10 @@ export class ChatUI {
   private nameEl: HTMLSpanElement
   private stageEl: HTMLSpanElement
 
+  // Cached action buttons for i18n updates
+  private feedBtn: HTMLButtonElement
+  private statusBtn: HTMLButtonElement
+
   // Streaming
   private streamingMsgEl: HTMLDivElement | null = null
 
@@ -295,12 +300,12 @@ export class ChatUI {
     closeBtn.addEventListener('click', () => this.toggle())
 
     // Quick action buttons
-    const feedBtn = this.panelEl.querySelector('[data-action="feed"]')!
-    feedBtn.addEventListener('click', () => {
+    this.feedBtn = this.panelEl.querySelector('[data-action="feed"]')! as HTMLButtonElement
+    this.feedBtn.addEventListener('click', () => {
       if (this._onFeed) this._onFeed()
     })
-    const statusBtn = this.panelEl.querySelector('[data-action="status"]')!
-    statusBtn.addEventListener('click', () => {
+    this.statusBtn = this.panelEl.querySelector('[data-action="status"]')! as HTMLButtonElement
+    this.statusBtn.addEventListener('click', () => {
       if (this._onStatus) this._onStatus()
     })
 
@@ -310,12 +315,21 @@ export class ChatUI {
 
     // Prevent host page (Gmail, Google Docs, etc.) from intercepting
     // keystrokes when the user is typing in our input field.
-    this.panelEl.addEventListener('keydown', (e) => e.stopPropagation(), true)
-    this.panelEl.addEventListener('keyup', (e) => e.stopPropagation(), true)
-    this.panelEl.addEventListener('keypress', (e) => e.stopPropagation(), true)
+    // Use bubble phase (no `true`) so child handlers (input Enter) fire first.
+    this.panelEl.addEventListener('keydown', (e) => e.stopPropagation())
+    this.panelEl.addEventListener('keyup', (e) => e.stopPropagation())
+    this.panelEl.addEventListener('keypress', (e) => e.stopPropagation())
   }
 
   // ── Public API ──────────────────────────────────────
+
+  /** Update all UI text to match current i18n language */
+  updateLanguage(): void {
+    this.feedBtn.textContent = t('feed')
+    this.statusBtn.textContent = t('status')
+    this.sendBtn.textContent = t('sendBtn')
+    this.inputEl.placeholder = t('inputPlaceholder')
+  }
 
   /** Update pet info shown in the header */
   updatePetInfo(name: string, stage: PetStage): void {

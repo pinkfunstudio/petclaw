@@ -202,12 +202,21 @@ Auth: ${provider === "claude" ? "x-api-key" : "Bearer"} ${apiKey.slice(0, 8)}...
     downloadFile("SOUL.md", data.soul);
     downloadFile("MEMORY.md", data.memory);
     downloadFile("USER.md", data.user);
-    downloadFile("ID.md", data.id);
+    downloadFile("IDENTITY.md", data.id);
   });
+  var currentPreview = "soul";
+  var previewFiles = [
+    { key: "soul", label: "SOUL.md" },
+    { key: "memory", label: "MEMORY.md" },
+    { key: "user", label: "USER.md" },
+    { key: "id", label: "IDENTITY.md" }
+  ];
   $("btn-preview").addEventListener("click", async () => {
     const box = $("preview-box");
+    const tabs = $("preview-tabs");
     if (box.classList.contains("visible")) {
       box.classList.remove("visible");
+      tabs.classList.remove("visible");
       return;
     }
     const res = await send({ type: "EXPORT" });
@@ -216,8 +225,20 @@ Auth: ${provider === "claude" ? "x-api-key" : "Bearer"} ${apiKey.slice(0, 8)}...
       box.classList.add("visible");
       return;
     }
-    box.textContent = res.exportData.soul;
+    tabs.innerHTML = previewFiles.map(
+      (f) => `<button class="preview-tab${f.key === currentPreview ? " active" : ""}" data-key="${f.key}">${f.label}</button>`
+    ).join("");
+    tabs.classList.add("visible");
+    box.textContent = res.exportData[currentPreview];
     box.classList.add("visible");
+    tabs.querySelectorAll(".preview-tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentPreview = btn.dataset.key;
+        tabs.querySelectorAll(".preview-tab").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        box.textContent = res.exportData[currentPreview];
+      });
+    });
   });
   function downloadFile(filename, content) {
     const blob = new Blob([content], { type: "text/markdown" });

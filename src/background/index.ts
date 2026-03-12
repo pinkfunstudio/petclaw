@@ -25,6 +25,7 @@ import {
   getMemoryStore, saveMemoryStore,
   getChatHistory, saveChatHistory,
   getSettings, saveSettings,
+  saveExportData,
 } from '../shared/storage'
 import { chatWithLLM } from './llm'
 import { generateAll } from './profiler'
@@ -33,6 +34,30 @@ import { trackActivity, trackMessage, trackFeedback } from './tracker'
 // ── Alarm name ──────────────────────────────────────────
 
 const DECAY_ALARM = 'petclaw-decay'
+
+// ── Auto-regenerate export data after interactions ──────
+
+let regenTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Debounced: regenerate 4 export files and save to storage */
+function scheduleExportRegen(): void {
+  if (regenTimer !== null) clearTimeout(regenTimer)
+  regenTimer = setTimeout(async () => {
+    regenTimer = null
+    try {
+      const [state, profile, memory] = await Promise.all([
+        getPetState(),
+        getUserProfile(),
+        getMemoryStore(),
+      ])
+      if (!state) return
+      const exportData = generateAll(state, profile, memory)
+      await saveExportData(exportData)
+    } catch {
+      // Non-critical — silent fail
+    }
+  }, 2000) // 2s debounce so rapid interactions don't spam regeneration
+}
 
 // ── Stage evolution ─────────────────────────────────────
 
@@ -409,6 +434,9 @@ async function handleMessage(
         saveChatHistory(chatHistory),
       ])
 
+      // 12. Auto-regenerate export files
+      scheduleExportRegen()
+
       return { ok: true, state }
     }
 
@@ -434,6 +462,7 @@ async function handleMessage(
         saveUserProfile(profile),
       ])
 
+      scheduleExportRegen()
       return { ok: true, state }
     }
 
@@ -450,6 +479,7 @@ async function handleMessage(
       state = checkEvolution(state)
 
       await savePetState(state)
+      scheduleExportRegen()
       return { ok: true, state }
     }
 
@@ -461,6 +491,8 @@ async function handleMessage(
       const profile = await getUserProfile()
       const memory = await getMemoryStore()
       const exportData = generateAll(state, profile, memory)
+      // Also persist the latest export
+      await saveExportData(exportData)
 
       return { ok: true, exportData }
     }

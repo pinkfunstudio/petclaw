@@ -8,12 +8,15 @@
 
 import type {
   PetState,
+  Settings,
   MessageToBackground,
   MessageToContent,
   BackgroundResponse,
 } from '../shared/types'
 import { Pet } from './pet'
 import { ChatUI } from './chat'
+import { ElementScanner } from './elements'
+import { setLang, t } from '../shared/i18n'
 
 const ACTIVE_INSTANCE_KEY = 'petclawActiveInstance'
 const SHUTDOWN_EVENT = 'petclaw:shutdown'
@@ -86,6 +89,7 @@ function initPetClaw() {
       clearInterval(syncTimer)
       syncTimer = null
     }
+    clearInterval(platformScanTimer)
     document.removeEventListener(SHUTDOWN_EVENT, handleShutdown as EventListener)
     window.removeEventListener('pagehide', handlePageHide)
     try {
@@ -126,6 +130,31 @@ function initPetClaw() {
 
   const pet = new Pet(innerWrapper)
   const chatUI = new ChatUI(shadowRoot, pet)
+  const elementScanner = new ElementScanner()
+
+  // Feed page platforms to the pet every 3 seconds
+  const platformScanTimer = setInterval(() => {
+    if (!isInstanceAlive()) return
+    try {
+      const platforms = elementScanner.getPlatforms()
+      pet.setPlatforms(platforms)
+    } catch {
+      // Scan may fail if DOM is in flux
+    }
+  }, 3000)
+
+  // Also update platforms on scroll (debounced)
+  let scrollDebounce: ReturnType<typeof setTimeout> | null = null
+  window.addEventListener('scroll', () => {
+    if (scrollDebounce) clearTimeout(scrollDebounce)
+    scrollDebounce = setTimeout(() => {
+      if (!isInstanceAlive()) return
+      try {
+        const platforms = elementScanner.getPlatforms()
+        pet.setPlatforms(platforms)
+      } catch { /* ignore */ }
+    }, 500)
+  }, { passive: true })
 
   // ── Helpers ───────────────────────────────────────────
 
@@ -213,6 +242,10 @@ function initPetClaw() {
       if (response.ok && response.state) {
         handleStateUpdate(response.state)
       }
+      if (response.ok && response.settings) {
+        setLang(response.settings.language)
+        chatUI.updateLanguage()
+      }
     } catch (err) {
       console.error('[PetClaw] Init failed:', err)
     }
@@ -228,12 +261,59 @@ function initPetClaw() {
     teardown()
   }
 
-  // ── Pet click → toggle chat panel ─────────────────────
+  // ── Pet single click → toggle chat panel ──────────────
 
   pet.onClick(() => {
     if (!isInstanceAlive()) return
     chatUI.toggle()
     void sendToBackground({ type: 'PET_INTERACTION', action: 'click' })
+  })
+
+  // ── Pet double click → open chat + greeting ──────────
+
+  pet.onDoubleClick(() => {
+    if (!isInstanceAlive()) return
+    if (!chatUI.panelOpen) chatUI.toggle()
+    chatUI.showBubble(t('whatUp'))
+    pet.setAction('happy')
+    void sendToBackground({ type: 'PET_INTERACTION', action: 'doubleclick' })
+  })
+
+  // ── Pet poke (rapid clicks) → escalating reactions ───
+
+  pet.onPoke((count: number) => {
+    if (!isInstanceAlive()) return
+    if (count === 1) {
+      // First poke — curious
+      pet.setAction('idle')
+    } else if (count === 2) {
+      // Second poke — playful
+      chatUI.showBubble(t('petMe'))
+      pet.setAction('happy')
+    } else if (count >= 5) {
+      // Too many pokes — annoyed
+      chatUI.showBubble(t('stopIt'))
+      pet.setAction('sad')
+    } else if (count >= 3) {
+      // 3-4 pokes — ouch
+      chatUI.showBubble(t('ouch'))
+    }
+    void sendToBackground({ type: 'PET_INTERACTION', action: 'poke' })
+  })
+
+  // ── Pet drag start → whee! ──────────────────────────
+
+  pet.onDragStartCallback(() => {
+    if (!isInstanceAlive()) return
+    chatUI.showBubble(t('whee'))
+  })
+
+  // ── Pet dropped → dizzy reaction ────────────────────
+
+  pet.onDrop(() => {
+    if (!isInstanceAlive()) return
+    chatUI.showBubble(t('dizzy'))
+    void sendToBackground({ type: 'PET_INTERACTION', action: 'drop' })
   })
 
   // ── Chat send ─────────────────────────────────────────
@@ -244,12 +324,12 @@ function initPetClaw() {
       chatUI.startStreamingMessage()
       const response = await sendToBackground({ type: 'CHAT', text })
       if (!response.ok) {
-        chatUI.finishStreaming(response.error || '连接失败，请重试')
+        chatUI.finishStreaming(response.error || t('connectionFailed'))
       }
     } catch (err) {
       teardown()
       console.error('[PetClaw] Chat failed:', err)
-      chatUI.finishStreaming('连接失败，请重试')
+      chatUI.finishStreaming(t('connectionFailed'))
     }
   })
 
@@ -262,7 +342,7 @@ function initPetClaw() {
       if (response.ok && response.state) {
         handleStateUpdate(response.state)
         pet.setAction('eat')
-        chatUI.showBubble('好吃！')
+        chatUI.showBubble(t('yummy'))
       }
     } catch (err) {
       teardown()
@@ -280,9 +360,9 @@ function initPetClaw() {
         const s = response.state
         const statusText = [
           `🦞 ${s.name}`,
-          `阶段: ${s.stage} | XP: ${s.experience}`,
-          `饥饿: ${s.hunger} | 心情: ${s.happiness} | 体力: ${s.energy}`,
-          `天数: ${s.daysActive}`,
+          `${t('labelStage')}: ${s.stage} | ${t('labelXP')}: ${s.experience}`,
+          `${t('labelHunger')}: ${s.hunger} | ${t('labelMood')}: ${s.happiness} | ${t('labelEnergy')}: ${s.energy}`,
+          `${t('labelDays')}: ${s.daysActive}`,
         ].join('\n')
         chatUI.appendMessage('pet', statusText)
       }

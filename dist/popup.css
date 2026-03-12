@@ -319,11 +319,39 @@ body {
   font-size: 11px;
   color: #888;
 }
-.preview-box {
+.preview-tabs {
+  display: none;
+  gap: 4px;
   margin-top: 8px;
+}
+.preview-tabs.visible {
+  display: flex;
+}
+.preview-tab {
+  flex: 1;
+  padding: 6px 4px;
+  background: #2a2a3e;
+  border: 1px solid #3a3a5a;
+  color: #888;
+  font-size: 11px;
+  font-family: monospace;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+  transition: all 0.15s;
+}
+.preview-tab:hover {
+  color: #ccc;
+  background: #3a3a4e;
+}
+.preview-tab.active {
+  color: #ff6b6b;
+  background: #1a1a2e;
+  border-bottom-color: #1a1a2e;
+}
+.preview-box {
   padding: 12px;
   background: #1a1a2e;
-  border-radius: 8px;
+  border-radius: 0 0 8px 8px;
   font-family: monospace;
   font-size: 11px;
   line-height: 1.5;
