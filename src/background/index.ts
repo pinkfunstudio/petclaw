@@ -523,7 +523,30 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 chrome.runtime.onInstalled.addListener(async () => {
   await setupDecayAlarm()
-  console.log('[PetClaw] Service worker installed, decay alarm set.')
+
+  // Re-inject content scripts into all existing tabs.
+  // Chrome does NOT auto-reinject on extension reload in dev mode,
+  // so old tabs are left with orphaned (dead) content scripts.
+  try {
+    const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] })
+    for (const tab of tabs) {
+      if (!tab.id) continue
+      // Inject JS (it will clean up the old container itself)
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js'],
+      }).catch(() => { /* tab may not allow injection (chrome://, etc.) */ })
+      // Ensure CSS is present
+      chrome.scripting.insertCSS({
+        target: { tabId: tab.id },
+        files: ['content.css'],
+      }).catch(() => {})
+    }
+  } catch {
+    // scripting API might fail, non-critical
+  }
+
+  console.log('[PetClaw] Service worker installed, content scripts re-injected.')
 })
 
 // ── Service worker startup ──────────────────────────────

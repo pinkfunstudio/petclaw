@@ -307,6 +307,12 @@ export class ChatUI {
     // Stop click propagation so clicking the panel doesn't close it
     this.panelEl.addEventListener('mousedown', (e) => e.stopPropagation())
     this.panelEl.addEventListener('touchstart', (e) => e.stopPropagation())
+
+    // Prevent host page (Gmail, Google Docs, etc.) from intercepting
+    // keystrokes when the user is typing in our input field.
+    this.panelEl.addEventListener('keydown', (e) => e.stopPropagation(), true)
+    this.panelEl.addEventListener('keyup', (e) => e.stopPropagation(), true)
+    this.panelEl.addEventListener('keypress', (e) => e.stopPropagation(), true)
   }
 
   // ── Public API ──────────────────────────────────────

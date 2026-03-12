@@ -1017,7 +1017,24 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 chrome.runtime.onInstalled.addListener(async () => {
   await setupDecayAlarm();
-  console.log("[PetClaw] Service worker installed, decay alarm set.");
+  try {
+    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+    for (const tab of tabs) {
+      if (!tab.id) continue;
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["content.js"]
+      }).catch(() => {
+      });
+      chrome.scripting.insertCSS({
+        target: { tabId: tab.id },
+        files: ["content.css"]
+      }).catch(() => {
+      });
+    }
+  } catch {
+  }
+  console.log("[PetClaw] Service worker installed, content scripts re-injected.");
 });
 setupDecayAlarm().then(() => {
   console.log("[PetClaw] Service worker started.");

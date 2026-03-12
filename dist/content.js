@@ -1404,6 +1404,9 @@
       });
       this.panelEl.addEventListener("mousedown", (e) => e.stopPropagation());
       this.panelEl.addEventListener("touchstart", (e) => e.stopPropagation());
+      this.panelEl.addEventListener("keydown", (e) => e.stopPropagation(), true);
+      this.panelEl.addEventListener("keyup", (e) => e.stopPropagation(), true);
+      this.panelEl.addEventListener("keypress", (e) => e.stopPropagation(), true);
     }
     // ── Public API ──────────────────────────────────────
     /** Update pet info shown in the header */
@@ -1510,6 +1513,17 @@
   };
 
   // src/content/index.ts
+  window.addEventListener("unhandledrejection", (e) => {
+    const msg = e.reason?.message || String(e.reason || "");
+    if (msg.includes("Extension context invalidated")) {
+      e.preventDefault();
+    }
+  });
+  window.addEventListener("error", (e) => {
+    if (e.message?.includes("Extension context invalidated")) {
+      e.preventDefault();
+    }
+  });
   {
     const existing = document.getElementById("petclaw-container");
     if (existing) existing.remove();
@@ -1552,7 +1566,7 @@
     const shadowHost = document.createElement("div");
     shadowHost.style.cssText = "position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;";
     container.appendChild(shadowHost);
-    const shadowRoot = shadowHost.attachShadow({ mode: "open" });
+    const shadowRoot = shadowHost.attachShadow({ mode: "open", delegatesFocus: true });
     const innerWrapper = document.createElement("div");
     innerWrapper.style.cssText = "position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;";
     shadowRoot.appendChild(innerWrapper);

@@ -15,10 +15,26 @@ import type {
 import { Pet } from './pet'
 import { ChatUI } from './chat'
 
-// On extension reload, Chrome injects a NEW content script but the OLD
-// one's DOM (#petclaw-container) is still on the page.  The old script's
-// chrome.runtime is dead, so the pet is unresponsive.  We must remove the
-// stale container and reinitialize.
+// ── Suppress errors from old orphaned content scripts ──────
+// After extension reload, old scripts keep running with a dead
+// chrome.runtime.  Their unhandled rejections cannot be caught
+// by the old code.  This handler runs in the SAME window and
+// silently suppresses those specific errors.
+// Catch async rejections from orphaned scripts
+window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
+  const msg = e.reason?.message || String(e.reason || '')
+  if (msg.includes('Extension context invalidated')) {
+    e.preventDefault()
+  }
+})
+// Catch synchronous throws from orphaned scripts (e.g. chrome.runtime.onMessage dispatch)
+window.addEventListener('error', (e: ErrorEvent) => {
+  if (e.message?.includes('Extension context invalidated')) {
+    e.preventDefault()
+  }
+})
+
+// ── Remove stale container and (re)initialize ───────────────
 {
   const existing = document.getElementById('petclaw-container')
   if (existing) existing.remove()
@@ -65,7 +81,7 @@ function initPetClaw() {
   const shadowHost = document.createElement('div')
   shadowHost.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;'
   container.appendChild(shadowHost)
-  const shadowRoot = shadowHost.attachShadow({ mode: 'open' })
+  const shadowRoot = shadowHost.attachShadow({ mode: 'open', delegatesFocus: true })
 
   const innerWrapper = document.createElement('div')
   innerWrapper.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;'
