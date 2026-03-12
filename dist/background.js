@@ -186,14 +186,47 @@ async function chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChu
       }
       return `[Error: ${errorMsg}]`;
     }
-    return parseSSEStream(response, (data) => {
+    let insideThink = false;
+    let thinkBuffer = "";
+    const rawText = await parseSSEStream(response, (data) => {
       const content = data.choices?.[0]?.delta?.content;
-      if (content) {
-        onChunk(content);
-        return content;
+      if (!content) return "";
+      let remaining = content;
+      let visible = "";
+      while (remaining.length > 0) {
+        if (insideThink) {
+          const closeIdx = remaining.indexOf("</think>");
+          if (closeIdx >= 0) {
+            insideThink = false;
+            remaining = remaining.slice(closeIdx + 8);
+          } else {
+            thinkBuffer += remaining;
+            remaining = "";
+          }
+        } else {
+          const openIdx = remaining.indexOf("<think>");
+          if (openIdx >= 0) {
+            visible += remaining.slice(0, openIdx);
+            insideThink = true;
+            thinkBuffer = "";
+            remaining = remaining.slice(openIdx + 7);
+          } else {
+            const partialIdx = remaining.lastIndexOf("<");
+            if (partialIdx >= 0 && "<think>".startsWith(remaining.slice(partialIdx))) {
+              visible += remaining.slice(0, partialIdx);
+              thinkBuffer = remaining.slice(partialIdx);
+              remaining = "";
+            } else {
+              visible += remaining;
+              remaining = "";
+            }
+          }
+        }
       }
-      return "";
+      if (visible) onChunk(visible);
+      return content;
     });
+    return stripThinkTags(rawText);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return `[Error: ${message}]`;
@@ -270,6 +303,10 @@ async function parseSSEStream(response, extractChunk) {
     }
   }
   return fullText || "[No response]";
+}
+function stripThinkTags(text) {
+  const stripped = text.replace(/<think>[\s\S]*?<\/think>/g, "");
+  return stripped.replace(/<think>[\s\S]*$/, "").trim();
 }
 
 // src/background/profiler.ts

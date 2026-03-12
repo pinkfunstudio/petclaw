@@ -67,15 +67,57 @@ async function chatOpenAICompatible(
       return `[Error: ${errorMsg}]`
     }
 
-    return parseSSEStream(response, (data) => {
-      // OpenAI-compatible SSE: choices[0].delta.content
+    // Strip <think>...</think> blocks from reasoning models (MiniMax M2.5, DeepSeek, etc.)
+    let insideThink = false
+    let thinkBuffer = ''
+
+    const rawText = await parseSSEStream(response, (data) => {
       const content = data.choices?.[0]?.delta?.content
-      if (content) {
-        onChunk(content)
-        return content
+      if (!content) return ''
+
+      // Track <think> state across streaming chunks
+      let remaining = content
+      let visible = ''
+
+      while (remaining.length > 0) {
+        if (insideThink) {
+          const closeIdx = remaining.indexOf('</think>')
+          if (closeIdx >= 0) {
+            insideThink = false
+            remaining = remaining.slice(closeIdx + 8)
+          } else {
+            // Still inside <think>, might have partial </think>
+            thinkBuffer += remaining
+            remaining = ''
+          }
+        } else {
+          const openIdx = remaining.indexOf('<think>')
+          if (openIdx >= 0) {
+            visible += remaining.slice(0, openIdx)
+            insideThink = true
+            thinkBuffer = ''
+            remaining = remaining.slice(openIdx + 7)
+          } else {
+            // Check for partial <think at end of chunk
+            const partialIdx = remaining.lastIndexOf('<')
+            if (partialIdx >= 0 && '<think>'.startsWith(remaining.slice(partialIdx))) {
+              visible += remaining.slice(0, partialIdx)
+              thinkBuffer = remaining.slice(partialIdx)
+              remaining = ''
+            } else {
+              visible += remaining
+              remaining = ''
+            }
+          }
+        }
       }
-      return ''
+
+      if (visible) onChunk(visible)
+      return content // return raw for full text (we strip at the end)
     })
+
+    // Strip all <think>...</think> from final text
+    return stripThinkTags(rawText)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return `[Error: ${message}]`
@@ -174,4 +216,13 @@ async function parseSSEStream(
   }
 
   return fullText || '[No response]'
+}
+
+// ── Strip <think> tags from reasoning models ──────────
+
+function stripThinkTags(text: string): string {
+  // Remove <think>...</think> blocks (including multiline)
+  const stripped = text.replace(/<think>[\s\S]*?<\/think>/g, '')
+  // Also remove unclosed <think> at the end (truncated response)
+  return stripped.replace(/<think>[\s\S]*$/, '').trim()
 }
