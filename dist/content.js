@@ -1524,27 +1524,54 @@
       e.preventDefault();
     }
   });
+  var ACTIVE_INSTANCE_KEY = "petclawActiveInstance";
+  var SHUTDOWN_EVENT = "petclaw:shutdown";
   {
+    document.dispatchEvent(new CustomEvent(SHUTDOWN_EVENT, {
+      detail: { reason: "reinitialize" }
+    }));
     const existing = document.getElementById("petclaw-container");
     if (existing) {
       const oldTimerId = existing.dataset.petclawSyncTimer;
       if (oldTimerId) clearInterval(Number(oldTimerId));
+      existing.dataset.petclawDead = "1";
       existing.remove();
     }
     initPetClaw();
   }
   function initPetClaw() {
-    function isContextValid() {
-      try {
-        return !!chrome.runtime?.id;
-      } catch {
+    const instanceId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    document.documentElement.dataset[ACTIVE_INSTANCE_KEY] = instanceId;
+    let syncTimer = null;
+    let tornDown = false;
+    function isCurrentInstance() {
+      return document.documentElement.dataset[ACTIVE_INSTANCE_KEY] === instanceId;
+    }
+    function isInstanceAlive() {
+      if (tornDown) return false;
+      if (container.dataset.petclawDead === "1") return false;
+      if (!isCurrentInstance()) {
+        teardown();
         return false;
       }
+      return true;
     }
     function teardown() {
+      if (tornDown) return;
+      tornDown = true;
+      if (document.documentElement.dataset[ACTIVE_INSTANCE_KEY] === instanceId) {
+        delete document.documentElement.dataset[ACTIVE_INSTANCE_KEY];
+      }
+      container.dataset.petclawDead = "1";
       if (syncTimer) {
         clearInterval(syncTimer);
         syncTimer = null;
+      }
+      document.removeEventListener(SHUTDOWN_EVENT, handleShutdown);
+      window.removeEventListener("pagehide", handlePageHide);
+      try {
+        chrome.runtime.onMessage.removeListener(handleBackgroundMessage);
+      } catch {
       }
       try {
         pet?.destroy();
@@ -1557,6 +1584,7 @@
     }
     const container = document.createElement("div");
     container.id = "petclaw-container";
+    container.dataset.petclawInstanceId = instanceId;
     container.style.cssText = `
     position: fixed;
     z-index: 2147483647;
@@ -1576,40 +1604,67 @@
     shadowRoot.appendChild(innerWrapper);
     const pet = new Pet(innerWrapper);
     const chatUI = new ChatUI(shadowRoot, pet);
-    function sendToBackground(msg) {
-      return new Promise((resolve) => {
-        if (!isContextValid()) {
-          teardown();
-          resolve({ ok: false, error: "Extension context invalidated" });
-          return;
+    function getErrorMessage(err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+    async function sendToBackground(msg) {
+      if (!isInstanceAlive()) {
+        return { ok: false, error: "Content script superseded" };
+      }
+      try {
+        const response = await chrome.runtime.sendMessage(msg);
+        if (!isInstanceAlive()) {
+          return { ok: false, error: "Content script superseded" };
         }
-        try {
-          chrome.runtime.sendMessage(msg, (response) => {
-            if (chrome.runtime.lastError) {
-              const errMsg = chrome.runtime.lastError.message ?? "Unknown error";
-              if (errMsg.includes("Extension context invalidated")) {
-                teardown();
-              }
-              resolve({ ok: false, error: errMsg });
-              return;
-            }
-            resolve(response);
-          });
-        } catch {
-          teardown();
-          resolve({ ok: false, error: "Extension context invalidated" });
-        }
-      });
+        return response ?? { ok: false, error: "No response from background" };
+      } catch (err) {
+        teardown();
+        return { ok: false, error: getErrorMessage(err) || "Extension context invalidated" };
+      }
     }
     function handleStateUpdate(state) {
+      if (!isInstanceAlive()) return;
       pet.updateState(state);
       chatUI.updatePetInfo(state.name, state.stage);
     }
-    async function init() {
-      if (!isContextValid()) {
-        teardown();
-        return;
+    function handleShutdown(event) {
+      const sourceId = event.detail?.instanceId;
+      if (sourceId === instanceId) return;
+      teardown();
+    }
+    function handlePageHide() {
+      teardown();
+    }
+    function handleBackgroundMessage(message, _sender, _sendResponse) {
+      try {
+        if (!isInstanceAlive()) return false;
+        switch (message.type) {
+          case "STATE_UPDATE":
+            handleStateUpdate(message.state);
+            break;
+          case "LLM_CHUNK":
+            chatUI.appendChunk(message.text);
+            break;
+          case "LLM_DONE":
+            chatUI.finishStreaming(message.fullText);
+            break;
+          case "PET_SPEAK":
+            chatUI.showBubble(message.text);
+            if (chatUI.panelOpen) {
+              chatUI.appendMessage("pet", message.text);
+            }
+            break;
+        }
+      } catch (err) {
+        if (err?.message?.includes("Extension context invalidated")) {
+          teardown();
+          return false;
+        }
+        throw err;
       }
+      return false;
+    }
+    async function init() {
       try {
         const response = await sendToBackground({ type: "INIT" });
         if (response.ok && response.state) {
@@ -1619,77 +1674,68 @@
         console.error("[PetClaw] Init failed:", err);
       }
     }
+    document.addEventListener(SHUTDOWN_EVENT, handleShutdown);
+    window.addEventListener("pagehide", handlePageHide);
     init();
-    if (isContextValid()) {
-      try {
-        chrome.runtime.onMessage.addListener(
-          (message, _sender, _sendResponse) => {
-            try {
-              if (!isContextValid()) return false;
-              switch (message.type) {
-                case "STATE_UPDATE":
-                  handleStateUpdate(message.state);
-                  break;
-                case "LLM_CHUNK":
-                  chatUI.appendChunk(message.text);
-                  break;
-                case "LLM_DONE":
-                  chatUI.finishStreaming(message.fullText);
-                  break;
-                case "PET_SPEAK":
-                  chatUI.showBubble(message.text);
-                  if (chatUI.panelOpen) {
-                    chatUI.appendMessage("pet", message.text);
-                  }
-                  break;
-              }
-            } catch (err) {
-              if (err?.message?.includes("Extension context invalidated")) {
-                teardown();
-                return false;
-              }
-              throw err;
-            }
-            return false;
-          }
-        );
-      } catch {
-      }
+    try {
+      chrome.runtime.onMessage.addListener(handleBackgroundMessage);
+    } catch {
+      teardown();
     }
     pet.onClick(() => {
+      if (!isInstanceAlive()) return;
       chatUI.toggle();
-      sendToBackground({ type: "PET_INTERACTION", action: "click" });
+      void sendToBackground({ type: "PET_INTERACTION", action: "click" });
     });
     chatUI.onSend(async (text) => {
-      chatUI.startStreamingMessage();
-      const response = await sendToBackground({ type: "CHAT", text });
-      if (!response.ok) {
-        chatUI.finishStreaming(response.error || "\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+      if (!isInstanceAlive()) return;
+      try {
+        chatUI.startStreamingMessage();
+        const response = await sendToBackground({ type: "CHAT", text });
+        if (!response.ok) {
+          chatUI.finishStreaming(response.error || "\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+        }
+      } catch (err) {
+        teardown();
+        console.error("[PetClaw] Chat failed:", err);
+        chatUI.finishStreaming("\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
       }
     });
     chatUI.onFeed(async () => {
-      const response = await sendToBackground({ type: "FEED" });
-      if (response.ok && response.state) {
-        handleStateUpdate(response.state);
-        pet.setAction("eat");
-        chatUI.showBubble("\u597D\u5403\uFF01");
+      if (!isInstanceAlive()) return;
+      try {
+        const response = await sendToBackground({ type: "FEED" });
+        if (response.ok && response.state) {
+          handleStateUpdate(response.state);
+          pet.setAction("eat");
+          chatUI.showBubble("\u597D\u5403\uFF01");
+        }
+      } catch (err) {
+        teardown();
+        console.error("[PetClaw] Feed failed:", err);
       }
     });
     chatUI.onStatus(async () => {
-      const response = await sendToBackground({ type: "GET_STATE" });
-      if (response.ok && response.state) {
-        const s = response.state;
-        const statusText = [
-          `\u{1F99E} ${s.name}`,
-          `\u9636\u6BB5: ${s.stage} | XP: ${s.experience}`,
-          `\u9965\u997F: ${s.hunger} | \u5FC3\u60C5: ${s.happiness} | \u4F53\u529B: ${s.energy}`,
-          `\u5929\u6570: ${s.daysActive}`
-        ].join("\n");
-        chatUI.appendMessage("pet", statusText);
+      if (!isInstanceAlive()) return;
+      try {
+        const response = await sendToBackground({ type: "GET_STATE" });
+        if (response.ok && response.state) {
+          const s = response.state;
+          const statusText = [
+            `\u{1F99E} ${s.name}`,
+            `\u9636\u6BB5: ${s.stage} | XP: ${s.experience}`,
+            `\u9965\u997F: ${s.hunger} | \u5FC3\u60C5: ${s.happiness} | \u4F53\u529B: ${s.energy}`,
+            `\u5929\u6570: ${s.daysActive}`
+          ].join("\n");
+          chatUI.appendMessage("pet", statusText);
+        }
+      } catch (err) {
+        teardown();
+        console.error("[PetClaw] Status refresh failed:", err);
       }
     });
-    let syncTimer = setInterval(async () => {
-      if (!isContextValid()) {
+    syncTimer = setInterval(async () => {
+      if (!isInstanceAlive()) {
         teardown();
         return;
       }

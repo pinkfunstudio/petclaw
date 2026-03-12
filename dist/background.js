@@ -816,6 +816,15 @@ async function broadcastState(state) {
   } catch {
   }
 }
+function getMessageTargetOptions(sender) {
+  if (sender.documentId) {
+    return { documentId: sender.documentId };
+  }
+  if (sender.frameId != null) {
+    return { frameId: sender.frameId };
+  }
+  return void 0;
+}
 chrome.runtime.onMessage.addListener(
   (msg, sender, sendResponse) => {
     handleMessage(msg, sender).then(sendResponse).catch((err) => {
@@ -869,6 +878,7 @@ async function handleMessage(msg, sender) {
         content: m.content
       }));
       const tabId = sender.tab?.id;
+      const messageTarget = getMessageTargetOptions(sender);
       const fullResponse = await chatWithLLM(
         llmMessages,
         systemPrompt,
@@ -877,7 +887,7 @@ async function handleMessage(msg, sender) {
         (chunk) => {
           if (tabId != null) {
             const chunkMsg = { type: "LLM_CHUNK", text: chunk };
-            chrome.tabs.sendMessage(tabId, chunkMsg).catch(() => {
+            chrome.tabs.sendMessage(tabId, chunkMsg, messageTarget).catch(() => {
             });
           }
         },
@@ -886,7 +896,7 @@ async function handleMessage(msg, sender) {
       );
       if (tabId != null) {
         const doneMsg = { type: "LLM_DONE", fullText: fullResponse };
-        chrome.tabs.sendMessage(tabId, doneMsg).catch(() => {
+        chrome.tabs.sendMessage(tabId, doneMsg, messageTarget).catch(() => {
         });
       }
       const petMsg = {

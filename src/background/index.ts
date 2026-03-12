@@ -252,6 +252,16 @@ async function broadcastState(state: PetState): Promise<void> {
   }
 }
 
+function getMessageTargetOptions(sender: chrome.runtime.MessageSender): chrome.tabs.MessageSendOptions | undefined {
+  if (sender.documentId) {
+    return { documentId: sender.documentId }
+  }
+  if (sender.frameId != null) {
+    return { frameId: sender.frameId }
+  }
+  return undefined
+}
+
 // ── Message handler ─────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(
@@ -330,6 +340,7 @@ async function handleMessage(
 
       // 5. Call LLM with streaming
       const tabId = sender.tab?.id
+      const messageTarget = getMessageTargetOptions(sender)
       const fullResponse = await chatWithLLM(
         llmMessages,
         systemPrompt,
@@ -339,7 +350,7 @@ async function handleMessage(
           // Stream chunks to sender tab
           if (tabId != null) {
             const chunkMsg: MessageToContent = { type: 'LLM_CHUNK', text: chunk }
-            chrome.tabs.sendMessage(tabId, chunkMsg).catch(() => {})
+            chrome.tabs.sendMessage(tabId, chunkMsg, messageTarget).catch(() => {})
           }
         },
         settings.provider,
@@ -349,7 +360,7 @@ async function handleMessage(
       // 6. Send done signal
       if (tabId != null) {
         const doneMsg: MessageToContent = { type: 'LLM_DONE', fullText: fullResponse }
-        chrome.tabs.sendMessage(tabId, doneMsg).catch(() => {})
+        chrome.tabs.sendMessage(tabId, doneMsg, messageTarget).catch(() => {})
       }
 
       // 7. Add pet response to chat history
