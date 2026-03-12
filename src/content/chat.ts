@@ -435,6 +435,14 @@ export class ChatUI {
     this._onStatus = callback
   }
 
+  /** Clean up timers and DOM references */
+  destroy(): void {
+    if (this.bubbleTimer !== null) {
+      clearTimeout(this.bubbleTimer)
+      this.bubbleTimer = null
+    }
+  }
+
   // ── Internal ──────────────────────────────────────────
 
   private handleSend(): void {

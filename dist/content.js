@@ -882,8 +882,11 @@
     dragStartX = 0;
     dragStartY = 0;
     lastDragX = 0;
-    // for computing throw velocity
+    // for touch end fallback
     lastDragY = 0;
+    prevDragX = 0;
+    // previous frame position for throw velocity
+    prevDragY = 0;
     dragMoved = false;
     // true if moved > threshold during drag
     // Click detection
@@ -1018,6 +1021,8 @@
     }
     moveDrag(clientX, clientY) {
       if (!this.dragging) return;
+      this.prevDragX = this.lastDragX;
+      this.prevDragY = this.lastDragY;
       this.lastDragX = clientX;
       this.lastDragY = clientY;
       this.x = clientX - this.dragOffsetX;
@@ -1033,8 +1038,8 @@
       if (!this.dragging) return;
       this.dragging = false;
       this.canvas.style.cursor = "grab";
-      const throwVX = (clientX - this.dragStartX) * 0.15;
-      const throwVY = (clientY - this.dragStartY) * 0.1;
+      const throwVX = (clientX - this.prevDragX) * 0.5;
+      const throwVY = (clientY - this.prevDragY) * 0.3;
       if (this.y < this.groundY) {
         this.action = "fall";
         this.animFrame = 0;
@@ -1373,12 +1378,12 @@
         if (petFeetY < p.top) continue;
         this.y = landingY;
         this.activePlatform = p;
-        this.surfaceMode = "on-platform";
         if (Math.abs(this.velocityY) > BOUNCE_THRESHOLD) {
           this.velocityY = -this.velocityY * BOUNCE_DAMPING;
           this.bouncing = true;
           this.triggerSquash();
         } else {
+          this.surfaceMode = "on-platform";
           this.velocityY = 0;
           this.velocityX = 0;
           this.bouncing = false;
@@ -1908,6 +1913,13 @@
     onStatus(callback) {
       this._onStatus = callback;
     }
+    /** Clean up timers and DOM references */
+    destroy() {
+      if (this.bubbleTimer !== null) {
+        clearTimeout(this.bubbleTimer);
+        this.bubbleTimer = null;
+      }
+    }
     // ── Internal ──────────────────────────────────────────
     handleSend() {
       const text = this.inputEl.value.trim();
@@ -2090,6 +2102,7 @@
     const instanceId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     document.documentElement.dataset[ACTIVE_INSTANCE_KEY] = instanceId;
     let syncTimer = null;
+    let scrollDebounce = null;
     let tornDown = false;
     function isCurrentInstance() {
       return document.documentElement.dataset[ACTIVE_INSTANCE_KEY] === instanceId;
@@ -2115,10 +2128,16 @@
         syncTimer = null;
       }
       clearInterval(platformScanTimer);
+      if (scrollDebounce) clearTimeout(scrollDebounce);
+      window.removeEventListener("scroll", handleScroll);
       document.removeEventListener(SHUTDOWN_EVENT, handleShutdown);
       window.removeEventListener("pagehide", handlePageHide);
       try {
         chrome.runtime.onMessage.removeListener(handleBackgroundMessage);
+      } catch {
+      }
+      try {
+        chatUI?.destroy();
       } catch {
       }
       try {
@@ -2161,8 +2180,7 @@
       } catch {
       }
     }, 3e3);
-    let scrollDebounce = null;
-    window.addEventListener("scroll", () => {
+    function handleScroll() {
       if (scrollDebounce) clearTimeout(scrollDebounce);
       scrollDebounce = setTimeout(() => {
         if (!isInstanceAlive()) return;
@@ -2172,7 +2190,8 @@
         } catch {
         }
       }, 500);
-    }, { passive: true });
+    }
+    window.addEventListener("scroll", handleScroll, { passive: true });
     function getErrorMessage(err) {
       return err instanceof Error ? err.message : String(err);
     }
@@ -2300,9 +2319,12 @@
           chatUI.finishStreaming(response.error || t("connectionFailed"));
         }
       } catch (err) {
-        teardown();
         console.error("[PetClaw] Chat failed:", err);
-        chatUI.finishStreaming(t("connectionFailed"));
+        try {
+          chatUI.finishStreaming(t("connectionFailed"));
+        } catch {
+        }
+        teardown();
       }
     });
     chatUI.onFeed(async () => {

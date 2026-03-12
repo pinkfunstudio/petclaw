@@ -162,7 +162,7 @@
         });
       }
       statusEl.textContent = `POST ${url}
-Auth: ${provider === "claude" ? "x-api-key" : "Bearer"} ${apiKey.slice(0, 8)}...`;
+Auth: ${provider === "claude" ? "x-api-key" : "Bearer"} ${apiKey.slice(0, 4)}****`;
       const response = await fetch(url, { method: "POST", headers, body });
       const text = await response.text();
       if (response.ok) {

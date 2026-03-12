@@ -76,8 +76,10 @@ export class Pet {
   private dragOffsetY = 0
   private dragStartX = 0
   private dragStartY = 0
-  private lastDragX = 0               // for computing throw velocity
+  private lastDragX = 0               // for touch end fallback
   private lastDragY = 0
+  private prevDragX = 0               // previous frame position for throw velocity
+  private prevDragY = 0
   private dragMoved = false           // true if moved > threshold during drag
 
   // Click detection
@@ -252,7 +254,9 @@ export class Pet {
   private moveDrag(clientX: number, clientY: number): void {
     if (!this.dragging) return
 
-    // Track velocity from last position
+    // Save previous position before overwriting (for throw velocity)
+    this.prevDragX = this.lastDragX
+    this.prevDragY = this.lastDragY
     this.lastDragX = clientX
     this.lastDragY = clientY
 
@@ -274,9 +278,9 @@ export class Pet {
     this.dragging = false
     this.canvas.style.cursor = 'grab'
 
-    // Compute throw velocity from mouse movement
-    const throwVX = (clientX - this.dragStartX) * 0.15
-    const throwVY = (clientY - this.dragStartY) * 0.1
+    // Compute throw velocity from recent movement delta
+    const throwVX = (clientX - this.prevDragX) * 0.5
+    const throwVY = (clientY - this.prevDragY) * 0.3
 
     // If above ground, start falling with throw velocity
     if (this.y < this.groundY) {
@@ -718,13 +722,15 @@ export class Pet {
       // Land on this platform
       this.y = landingY
       this.activePlatform = p
-      this.surfaceMode = 'on-platform'
 
       if (Math.abs(this.velocityY) > BOUNCE_THRESHOLD) {
+        // Keep surfaceMode as 'ground' during bounce so falling branch handles it
         this.velocityY = -this.velocityY * BOUNCE_DAMPING
         this.bouncing = true
         this.triggerSquash()
       } else {
+        // Settled — now safely transition to on-platform
+        this.surfaceMode = 'on-platform'
         this.velocityY = 0
         this.velocityX = 0
         this.bouncing = false

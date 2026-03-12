@@ -58,6 +58,7 @@ function initPetClaw() {
   document.documentElement.dataset[ACTIVE_INSTANCE_KEY] = instanceId
 
   let syncTimer: ReturnType<typeof setInterval> | null = null
+  let scrollDebounce: ReturnType<typeof setTimeout> | null = null
   let tornDown = false
 
   function isCurrentInstance(): boolean {
@@ -90,6 +91,8 @@ function initPetClaw() {
       syncTimer = null
     }
     clearInterval(platformScanTimer)
+    if (scrollDebounce) clearTimeout(scrollDebounce)
+    window.removeEventListener('scroll', handleScroll)
     document.removeEventListener(SHUTDOWN_EVENT, handleShutdown as EventListener)
     window.removeEventListener('pagehide', handlePageHide)
     try {
@@ -97,6 +100,7 @@ function initPetClaw() {
     } catch {
       // Context may already be gone.
     }
+    try { chatUI?.destroy() } catch { /* already gone */ }
     try { pet?.destroy() } catch { /* already gone */ }
     try { container?.remove() } catch { /* already gone */ }
   }
@@ -144,8 +148,7 @@ function initPetClaw() {
   }, 3000)
 
   // Also update platforms on scroll (debounced)
-  let scrollDebounce: ReturnType<typeof setTimeout> | null = null
-  window.addEventListener('scroll', () => {
+  function handleScroll(): void {
     if (scrollDebounce) clearTimeout(scrollDebounce)
     scrollDebounce = setTimeout(() => {
       if (!isInstanceAlive()) return
@@ -154,7 +157,8 @@ function initPetClaw() {
         pet.setPlatforms(platforms)
       } catch { /* ignore */ }
     }, 500)
-  }, { passive: true })
+  }
+  window.addEventListener('scroll', handleScroll, { passive: true })
 
   // ── Helpers ───────────────────────────────────────────
 
@@ -327,9 +331,9 @@ function initPetClaw() {
         chatUI.finishStreaming(response.error || t('connectionFailed'))
       }
     } catch (err) {
-      teardown()
       console.error('[PetClaw] Chat failed:', err)
-      chatUI.finishStreaming(t('connectionFailed'))
+      try { chatUI.finishStreaming(t('connectionFailed')) } catch { /* */ }
+      teardown()
     }
   })
 
