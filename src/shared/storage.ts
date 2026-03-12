@@ -15,7 +15,7 @@ const KEYS = {
 
 async function get<T>(key: string): Promise<T | null> {
   const result = await chrome.storage.local.get(key)
-  return result[key] ?? null
+  return (result[key] as T) ?? null
 }
 
 async function set<T>(key: string, value: T): Promise<void> {

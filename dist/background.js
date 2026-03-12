@@ -206,6 +206,7 @@ async function chatClaude(messages, systemPrompt, apiKey, model, onChunk) {
       headers: {
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
         "content-type": "application/json"
       },
       body: JSON.stringify({
@@ -983,5 +984,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 setupDecayAlarm().then(() => {
   console.log("[PetClaw] Service worker started.");
+}).catch((err) => {
+  console.error("[PetClaw] Failed to setup decay alarm:", err);
 });
 //# sourceMappingURL=background.js.map

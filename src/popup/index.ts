@@ -3,7 +3,11 @@ import { STAGE_NAMES } from '../shared/constants'
 
 // ── DOM refs ───────────────────────────────────────────
 
-const $ = (id: string) => document.getElementById(id)!
+const $ = (id: string): HTMLElement => {
+  const el = document.getElementById(id)
+  if (!el) throw new Error(`[PetClaw] Missing element #${id}`)
+  return el
+}
 
 // ── Tabs ───────────────────────────────────────────────
 
@@ -26,8 +30,17 @@ function send<T = any>(msg: MessageToBackground): Promise<T> {
 // ── Load & render state ────────────────────────────────
 
 async function loadState() {
-  const res = await send<{ ok: boolean; state?: PetState }>({ type: 'GET_STATE' })
-  if (res.ok && res.state) renderState(res.state)
+  try {
+    // Try GET_STATE first; if no pet exists, INIT will create one
+    let res = await send<{ ok: boolean; state?: PetState; settings?: any }>({ type: 'GET_STATE' })
+    if (!res.ok || !res.state) {
+      // No pet state yet — trigger INIT to create default pet
+      res = await send<{ ok: boolean; state?: PetState; settings?: any }>({ type: 'INIT' })
+    }
+    if (res.ok && res.state) renderState(res.state)
+  } catch (err) {
+    console.error('[PetClaw] Failed to load state:', err)
+  }
 }
 
 function renderState(s: PetState) {
@@ -69,18 +82,22 @@ function setPersonality(id: string, value: number) {
 // ── Settings ───────────────────────────────────────────
 
 async function loadSettings() {
-  const res = await send<{ ok: boolean; settings?: Settings }>({ type: 'GET_SETTINGS' })
-  if (!res.ok || !res.settings) return
-  const s = res.settings
+  try {
+    const res = await send<{ ok: boolean; settings?: Settings }>({ type: 'GET_SETTINGS' })
+    if (!res.ok || !res.settings) return
+    const s = res.settings
 
-  ;($('input-name') as HTMLInputElement).value = s.petName
-  ;($('input-language') as HTMLSelectElement).value = s.language
-  ;($('input-provider') as HTMLSelectElement).value = s.provider
-  ;($('input-baseurl') as HTMLInputElement).value = s.apiBaseUrl
-  ;($('input-apikey') as HTMLInputElement).value = s.apiKey
-  ;($('input-model') as HTMLInputElement).value = s.model
-  ;($('input-tracking') as HTMLInputElement).checked = s.enableBrowsingTracker
-  ;($('input-visible') as HTMLInputElement).checked = s.petVisible
+    ;($('input-name') as HTMLInputElement).value = s.petName
+    ;($('input-language') as HTMLSelectElement).value = s.language
+    ;($('input-provider') as HTMLSelectElement).value = s.provider
+    ;($('input-baseurl') as HTMLInputElement).value = s.apiBaseUrl
+    ;($('input-apikey') as HTMLInputElement).value = s.apiKey
+    ;($('input-model') as HTMLInputElement).value = s.model
+    ;($('input-tracking') as HTMLInputElement).checked = s.enableBrowsingTracker
+    ;($('input-visible') as HTMLInputElement).checked = s.petVisible
+  } catch (err) {
+    console.error('[PetClaw] Failed to load settings:', err)
+  }
 }
 
 // ── Read form values ───────────────────────────────────
@@ -143,6 +160,7 @@ $('btn-test-api').addEventListener('click', async () => {
       headers = {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
         'content-type': 'application/json',
       }
       body = JSON.stringify({

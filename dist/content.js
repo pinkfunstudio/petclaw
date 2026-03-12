@@ -1551,9 +1551,13 @@
       chatUI.updatePetInfo(state.name, state.stage);
     }
     async function init() {
-      const response = await sendToBackground({ type: "INIT" });
-      if (response.ok && response.state) {
-        handleStateUpdate(response.state);
+      try {
+        const response = await sendToBackground({ type: "INIT" });
+        if (response.ok && response.state) {
+          handleStateUpdate(response.state);
+        }
+      } catch (err) {
+        console.error("[PetClaw] Init failed:", err);
       }
     }
     init();
@@ -1612,9 +1616,12 @@
       }
     });
     setInterval(async () => {
-      const response = await sendToBackground({ type: "GET_STATE" });
-      if (response.ok && response.state) {
-        handleStateUpdate(response.state);
+      try {
+        const response = await sendToBackground({ type: "GET_STATE" });
+        if (response.ok && response.state) {
+          handleStateUpdate(response.state);
+        }
+      } catch {
       }
     }, 3e4);
   }

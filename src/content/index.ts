@@ -72,9 +72,13 @@ function initPetClaw() {
   // ── Initialize ────────────────────────────────────────
 
   async function init(): Promise<void> {
-    const response = await sendToBackground({ type: 'INIT' })
-    if (response.ok && response.state) {
-      handleStateUpdate(response.state)
+    try {
+      const response = await sendToBackground({ type: 'INIT' })
+      if (response.ok && response.state) {
+        handleStateUpdate(response.state)
+      }
+    } catch (err) {
+      console.error('[PetClaw] Init failed:', err)
     }
   }
 
@@ -155,9 +159,13 @@ function initPetClaw() {
   // ── Periodic state sync ───────────────────────────────
 
   setInterval(async () => {
-    const response = await sendToBackground({ type: 'GET_STATE' })
-    if (response.ok && response.state) {
-      handleStateUpdate(response.state)
+    try {
+      const response = await sendToBackground({ type: 'GET_STATE' })
+      if (response.ok && response.state) {
+        handleStateUpdate(response.state)
+      }
+    } catch {
+      // Service worker might be inactive, ignore
     }
   }, 30_000)
 }

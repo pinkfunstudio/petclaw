@@ -13,7 +13,11 @@
   };
 
   // src/popup/index.ts
-  var $ = (id) => document.getElementById(id);
+  var $ = (id) => {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`[PetClaw] Missing element #${id}`);
+    return el;
+  };
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
@@ -27,8 +31,15 @@
     return chrome.runtime.sendMessage(msg);
   }
   async function loadState() {
-    const res = await send({ type: "GET_STATE" });
-    if (res.ok && res.state) renderState(res.state);
+    try {
+      let res = await send({ type: "GET_STATE" });
+      if (!res.ok || !res.state) {
+        res = await send({ type: "INIT" });
+      }
+      if (res.ok && res.state) renderState(res.state);
+    } catch (err) {
+      console.error("[PetClaw] Failed to load state:", err);
+    }
   }
   function renderState(s) {
     $("pet-name").textContent = s.name;
@@ -61,17 +72,21 @@
     el.style.width = "10%";
   }
   async function loadSettings() {
-    const res = await send({ type: "GET_SETTINGS" });
-    if (!res.ok || !res.settings) return;
-    const s = res.settings;
-    $("input-name").value = s.petName;
-    $("input-language").value = s.language;
-    $("input-provider").value = s.provider;
-    $("input-baseurl").value = s.apiBaseUrl;
-    $("input-apikey").value = s.apiKey;
-    $("input-model").value = s.model;
-    $("input-tracking").checked = s.enableBrowsingTracker;
-    $("input-visible").checked = s.petVisible;
+    try {
+      const res = await send({ type: "GET_SETTINGS" });
+      if (!res.ok || !res.settings) return;
+      const s = res.settings;
+      $("input-name").value = s.petName;
+      $("input-language").value = s.language;
+      $("input-provider").value = s.provider;
+      $("input-baseurl").value = s.apiBaseUrl;
+      $("input-apikey").value = s.apiKey;
+      $("input-model").value = s.model;
+      $("input-tracking").checked = s.enableBrowsingTracker;
+      $("input-visible").checked = s.petVisible;
+    } catch (err) {
+      console.error("[PetClaw] Failed to load settings:", err);
+    }
   }
   function readFormSettings() {
     return {
@@ -123,6 +138,7 @@
         headers = {
           "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
           "content-type": "application/json"
         };
         body = JSON.stringify({

@@ -530,4 +530,6 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 setupDecayAlarm().then(() => {
   console.log('[PetClaw] Service worker started.')
+}).catch(err => {
+  console.error('[PetClaw] Failed to setup decay alarm:', err)
 })
