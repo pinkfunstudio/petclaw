@@ -871,8 +871,8 @@
     physicsInterval = null;
     // Click callback
     _onClick = null;
-    constructor(container2) {
-      this.container = container2;
+    constructor(container) {
+      this.container = container;
       this.canvas = document.createElement("canvas");
       this.canvas.width = PET_SIZE;
       this.canvas.height = PET_SIZE;
@@ -886,7 +886,7 @@
       pointer-events: auto;
     `;
       this.ctx = this.canvas.getContext("2d");
-      container2.appendChild(this.canvas);
+      container.appendChild(this.canvas);
       this.groundY = window.innerHeight - GROUND_Y_OFFSET - PET_SIZE;
       this.y = this.groundY;
       this.animInterval = window.setInterval(() => this.animTick(), 1e3 / ANIMATION_FPS);
@@ -1352,15 +1352,15 @@
     _onSend = null;
     _onFeed = null;
     _onStatus = null;
-    constructor(shadowRoot2, pet2) {
-      this.shadowRoot = shadowRoot2;
-      this.pet = pet2;
+    constructor(shadowRoot, pet) {
+      this.shadowRoot = shadowRoot;
+      this.pet = pet;
       const style = document.createElement("style");
       style.textContent = SHADOW_STYLES;
-      shadowRoot2.appendChild(style);
+      shadowRoot.appendChild(style);
       this.bubbleEl = document.createElement("div");
       this.bubbleEl.className = "petclaw-bubble";
-      shadowRoot2.appendChild(this.bubbleEl);
+      shadowRoot.appendChild(this.bubbleEl);
       this.panelEl = document.createElement("div");
       this.panelEl.className = "petclaw-panel";
       this.panelEl.innerHTML = `
@@ -1379,7 +1379,7 @@
         <button class="send-btn">Send</button>
       </div>
     `;
-      shadowRoot2.appendChild(this.panelEl);
+      shadowRoot.appendChild(this.panelEl);
       this.nameEl = this.panelEl.querySelector(".pet-name");
       this.stageEl = this.panelEl.querySelector(".pet-stage");
       this.messagesEl = this.panelEl.querySelector(".petclaw-messages");
@@ -1510,115 +1510,113 @@
   };
 
   // src/content/index.ts
-  if (document.getElementById("petclaw-container")) {
-    throw new Error("PetClaw already initialized");
+  if (!document.getElementById("petclaw-container")) {
+    initPetClaw();
   }
-  var container = document.createElement("div");
-  container.id = "petclaw-container";
-  container.style.cssText = `
-  position: fixed;
-  z-index: 2147483647;
-  pointer-events: none;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-`;
-  document.body.appendChild(container);
-  var shadowHost = document.createElement("div");
-  shadowHost.style.cssText = "position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;";
-  container.appendChild(shadowHost);
-  var shadowRoot = shadowHost.attachShadow({ mode: "open" });
-  var innerWrapper = document.createElement("div");
-  innerWrapper.style.cssText = "position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;";
-  shadowRoot.appendChild(innerWrapper);
-  var pet = new Pet(innerWrapper);
-  var chatUI = new ChatUI(shadowRoot, pet);
-  function sendToBackground(msg) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(msg, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false, error: chrome.runtime.lastError.message ?? "Unknown error" });
-          return;
-        }
-        resolve(response);
-      });
-    });
-  }
-  function handleStateUpdate(state) {
-    pet.updateState(state);
-    chatUI.updatePetInfo(state.name, state.stage);
-  }
-  async function init() {
-    const response = await sendToBackground({ type: "INIT" });
-    if (response.ok && response.state) {
-      handleStateUpdate(response.state);
-    }
-  }
-  init();
-  chrome.runtime.onMessage.addListener(
-    (message, _sender, _sendResponse) => {
-      switch (message.type) {
-        case "STATE_UPDATE":
-          handleStateUpdate(message.state);
-          break;
-        case "LLM_CHUNK":
-          chatUI.appendChunk(message.text);
-          break;
-        case "LLM_DONE":
-          chatUI.finishStreaming(message.fullText);
-          break;
-        case "PET_SPEAK":
-          chatUI.showBubble(message.text);
-          if (chatUI.panelOpen) {
-            chatUI.appendMessage("pet", message.text);
+  function initPetClaw() {
+    const container = document.createElement("div");
+    container.id = "petclaw-container";
+    container.style.cssText = `
+    position: fixed;
+    z-index: 2147483647;
+    pointer-events: none;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+  `;
+    document.body.appendChild(container);
+    const shadowHost = document.createElement("div");
+    shadowHost.style.cssText = "position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;";
+    container.appendChild(shadowHost);
+    const shadowRoot = shadowHost.attachShadow({ mode: "open" });
+    const innerWrapper = document.createElement("div");
+    innerWrapper.style.cssText = "position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;";
+    shadowRoot.appendChild(innerWrapper);
+    const pet = new Pet(innerWrapper);
+    const chatUI = new ChatUI(shadowRoot, pet);
+    function sendToBackground(msg) {
+      return new Promise((resolve) => {
+        chrome.runtime.sendMessage(msg, (response) => {
+          if (chrome.runtime.lastError) {
+            resolve({ ok: false, error: chrome.runtime.lastError.message ?? "Unknown error" });
+            return;
           }
-          break;
+          resolve(response);
+        });
+      });
+    }
+    function handleStateUpdate(state) {
+      pet.updateState(state);
+      chatUI.updatePetInfo(state.name, state.stage);
+    }
+    async function init() {
+      const response = await sendToBackground({ type: "INIT" });
+      if (response.ok && response.state) {
+        handleStateUpdate(response.state);
       }
-      return false;
     }
-  );
-  pet.onClick(() => {
-    chatUI.toggle();
-    sendToBackground({ type: "PET_INTERACTION", action: "click" });
-  });
-  chatUI.onSend(async (text) => {
-    chatUI.startStreamingMessage();
-    const response = await sendToBackground({ type: "CHAT", text });
-    if (!response.ok) {
-      chatUI.finishStreaming("(Connection error \u2014 try again)");
-    }
-  });
-  chatUI.onFeed(async () => {
-    const response = await sendToBackground({ type: "FEED" });
-    if (response.ok && response.state) {
-      handleStateUpdate(response.state);
-      pet.setAction("eat");
-      chatUI.showBubble("Yum!");
-    }
-  });
-  chatUI.onStatus(async () => {
-    const response = await sendToBackground({ type: "GET_STATE" });
-    if (response.ok && response.state) {
-      const s = response.state;
-      const statusText = [
-        `${s.name}`,
-        `Stage: ${s.stage}`,
-        `Hunger: ${s.hunger}/100`,
-        `Happiness: ${s.happiness}/100`,
-        `Energy: ${s.energy}/100`,
-        `XP: ${s.experience}`,
-        `Days: ${s.daysActive}`
-      ].join("\n");
-      chatUI.appendMessage("pet", statusText);
-    }
-  });
-  var STATE_SYNC_INTERVAL = 3e4;
-  setInterval(async () => {
-    const response = await sendToBackground({ type: "GET_STATE" });
-    if (response.ok && response.state) {
-      handleStateUpdate(response.state);
-    }
-  }, STATE_SYNC_INTERVAL);
+    init();
+    chrome.runtime.onMessage.addListener(
+      (message, _sender, _sendResponse) => {
+        switch (message.type) {
+          case "STATE_UPDATE":
+            handleStateUpdate(message.state);
+            break;
+          case "LLM_CHUNK":
+            chatUI.appendChunk(message.text);
+            break;
+          case "LLM_DONE":
+            chatUI.finishStreaming(message.fullText);
+            break;
+          case "PET_SPEAK":
+            chatUI.showBubble(message.text);
+            if (chatUI.panelOpen) {
+              chatUI.appendMessage("pet", message.text);
+            }
+            break;
+        }
+        return false;
+      }
+    );
+    pet.onClick(() => {
+      chatUI.toggle();
+      sendToBackground({ type: "PET_INTERACTION", action: "click" });
+    });
+    chatUI.onSend(async (text) => {
+      chatUI.startStreamingMessage();
+      const response = await sendToBackground({ type: "CHAT", text });
+      if (!response.ok) {
+        chatUI.finishStreaming(response.error || "\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+      }
+    });
+    chatUI.onFeed(async () => {
+      const response = await sendToBackground({ type: "FEED" });
+      if (response.ok && response.state) {
+        handleStateUpdate(response.state);
+        pet.setAction("eat");
+        chatUI.showBubble("\u597D\u5403\uFF01");
+      }
+    });
+    chatUI.onStatus(async () => {
+      const response = await sendToBackground({ type: "GET_STATE" });
+      if (response.ok && response.state) {
+        const s = response.state;
+        const statusText = [
+          `\u{1F99E} ${s.name}`,
+          `\u9636\u6BB5: ${s.stage} | XP: ${s.experience}`,
+          `\u9965\u997F: ${s.hunger} | \u5FC3\u60C5: ${s.happiness} | \u4F53\u529B: ${s.energy}`,
+          `\u5929\u6570: ${s.daysActive}`
+        ].join("\n");
+        chatUI.appendMessage("pet", statusText);
+      }
+    });
+    setInterval(async () => {
+      const response = await sendToBackground({ type: "GET_STATE" });
+      if (response.ok && response.state) {
+        handleStateUpdate(response.state);
+      }
+    }, 3e4);
+  }
 })();
 //# sourceMappingURL=content.js.map

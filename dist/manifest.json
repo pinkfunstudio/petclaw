@@ -3,7 +3,7 @@
   "name": "PetClaw",
   "version": "0.1.0",
   "description": "A browser pet that learns your style and generates OpenClaw config files",
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "alarms", "tabs"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
