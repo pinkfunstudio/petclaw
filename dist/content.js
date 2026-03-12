@@ -1514,6 +1514,27 @@
     initPetClaw();
   }
   function initPetClaw() {
+    function isContextValid() {
+      try {
+        return !!chrome.runtime?.id;
+      } catch {
+        return false;
+      }
+    }
+    function teardown() {
+      if (syncTimer) {
+        clearInterval(syncTimer);
+        syncTimer = null;
+      }
+      try {
+        pet?.destroy();
+      } catch {
+      }
+      try {
+        container?.remove();
+      } catch {
+      }
+    }
     const container = document.createElement("div");
     container.id = "petclaw-container";
     container.style.cssText = `
@@ -1537,13 +1558,27 @@
     const chatUI = new ChatUI(shadowRoot, pet);
     function sendToBackground(msg) {
       return new Promise((resolve) => {
-        chrome.runtime.sendMessage(msg, (response) => {
-          if (chrome.runtime.lastError) {
-            resolve({ ok: false, error: chrome.runtime.lastError.message ?? "Unknown error" });
-            return;
-          }
-          resolve(response);
-        });
+        if (!isContextValid()) {
+          teardown();
+          resolve({ ok: false, error: "Extension context invalidated" });
+          return;
+        }
+        try {
+          chrome.runtime.sendMessage(msg, (response) => {
+            if (chrome.runtime.lastError) {
+              const errMsg = chrome.runtime.lastError.message ?? "Unknown error";
+              if (errMsg.includes("Extension context invalidated")) {
+                teardown();
+              }
+              resolve({ ok: false, error: errMsg });
+              return;
+            }
+            resolve(response);
+          });
+        } catch {
+          teardown();
+          resolve({ ok: false, error: "Extension context invalidated" });
+        }
       });
     }
     function handleStateUpdate(state) {
@@ -1551,6 +1586,10 @@
       chatUI.updatePetInfo(state.name, state.stage);
     }
     async function init() {
+      if (!isContextValid()) {
+        teardown();
+        return;
+      }
       try {
         const response = await sendToBackground({ type: "INIT" });
         if (response.ok && response.state) {
@@ -1561,28 +1600,31 @@
       }
     }
     init();
-    chrome.runtime.onMessage.addListener(
-      (message, _sender, _sendResponse) => {
-        switch (message.type) {
-          case "STATE_UPDATE":
-            handleStateUpdate(message.state);
-            break;
-          case "LLM_CHUNK":
-            chatUI.appendChunk(message.text);
-            break;
-          case "LLM_DONE":
-            chatUI.finishStreaming(message.fullText);
-            break;
-          case "PET_SPEAK":
-            chatUI.showBubble(message.text);
-            if (chatUI.panelOpen) {
-              chatUI.appendMessage("pet", message.text);
-            }
-            break;
+    if (isContextValid()) {
+      chrome.runtime.onMessage.addListener(
+        (message, _sender, _sendResponse) => {
+          if (!isContextValid()) return false;
+          switch (message.type) {
+            case "STATE_UPDATE":
+              handleStateUpdate(message.state);
+              break;
+            case "LLM_CHUNK":
+              chatUI.appendChunk(message.text);
+              break;
+            case "LLM_DONE":
+              chatUI.finishStreaming(message.fullText);
+              break;
+            case "PET_SPEAK":
+              chatUI.showBubble(message.text);
+              if (chatUI.panelOpen) {
+                chatUI.appendMessage("pet", message.text);
+              }
+              break;
+          }
+          return false;
         }
-        return false;
-      }
-    );
+      );
+    }
     pet.onClick(() => {
       chatUI.toggle();
       sendToBackground({ type: "PET_INTERACTION", action: "click" });
@@ -1615,7 +1657,11 @@
         chatUI.appendMessage("pet", statusText);
       }
     });
-    setInterval(async () => {
+    let syncTimer = setInterval(async () => {
+      if (!isContextValid()) {
+        teardown();
+        return;
+      }
       try {
         const response = await sendToBackground({ type: "GET_STATE" });
         if (response.ok && response.state) {

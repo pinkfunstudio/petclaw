@@ -21,6 +21,27 @@ if (!document.getElementById('petclaw-container')) {
 }
 
 function initPetClaw() {
+  // ── Context validity check ──────────────────────────
+
+  /** Returns true if the extension context is still alive. */
+  function isContextValid(): boolean {
+    try {
+      return !!chrome.runtime?.id
+    } catch {
+      return false
+    }
+  }
+
+  /** Tears down the entire PetClaw instance when context dies. */
+  function teardown(): void {
+    if (syncTimer) {
+      clearInterval(syncTimer)
+      syncTimer = null
+    }
+    try { pet?.destroy() } catch { /* already gone */ }
+    try { container?.remove() } catch { /* already gone */ }
+  }
+
   // ── Create container + Shadow DOM ─────────────────────
 
   const container = document.createElement('div')
@@ -54,13 +75,27 @@ function initPetClaw() {
 
   function sendToBackground(msg: MessageToBackground): Promise<BackgroundResponse> {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage(msg, (response: BackgroundResponse) => {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false, error: chrome.runtime.lastError.message ?? 'Unknown error' })
-          return
-        }
-        resolve(response)
-      })
+      if (!isContextValid()) {
+        teardown()
+        resolve({ ok: false, error: 'Extension context invalidated' })
+        return
+      }
+      try {
+        chrome.runtime.sendMessage(msg, (response: BackgroundResponse) => {
+          if (chrome.runtime.lastError) {
+            const errMsg = chrome.runtime.lastError.message ?? 'Unknown error'
+            if (errMsg.includes('Extension context invalidated')) {
+              teardown()
+            }
+            resolve({ ok: false, error: errMsg })
+            return
+          }
+          resolve(response)
+        })
+      } catch {
+        teardown()
+        resolve({ ok: false, error: 'Extension context invalidated' })
+      }
     })
   }
 
@@ -72,6 +107,7 @@ function initPetClaw() {
   // ── Initialize ────────────────────────────────────────
 
   async function init(): Promise<void> {
+    if (!isContextValid()) { teardown(); return }
     try {
       const response = await sendToBackground({ type: 'INIT' })
       if (response.ok && response.state) {
@@ -86,31 +122,34 @@ function initPetClaw() {
 
   // ── Listen for messages from background ───────────────
 
-  chrome.runtime.onMessage.addListener(
-    (message: MessageToContent, _sender, _sendResponse) => {
-      switch (message.type) {
-        case 'STATE_UPDATE':
-          handleStateUpdate(message.state)
-          break
+  if (isContextValid()) {
+    chrome.runtime.onMessage.addListener(
+      (message: MessageToContent, _sender, _sendResponse) => {
+        if (!isContextValid()) return false
+        switch (message.type) {
+          case 'STATE_UPDATE':
+            handleStateUpdate(message.state)
+            break
 
-        case 'LLM_CHUNK':
-          chatUI.appendChunk(message.text)
-          break
+          case 'LLM_CHUNK':
+            chatUI.appendChunk(message.text)
+            break
 
-        case 'LLM_DONE':
-          chatUI.finishStreaming(message.fullText)
-          break
+          case 'LLM_DONE':
+            chatUI.finishStreaming(message.fullText)
+            break
 
-        case 'PET_SPEAK':
-          chatUI.showBubble(message.text)
-          if (chatUI.panelOpen) {
-            chatUI.appendMessage('pet', message.text)
-          }
-          break
-      }
-      return false
-    },
-  )
+          case 'PET_SPEAK':
+            chatUI.showBubble(message.text)
+            if (chatUI.panelOpen) {
+              chatUI.appendMessage('pet', message.text)
+            }
+            break
+        }
+        return false
+      },
+    )
+  }
 
   // ── Pet click → toggle chat panel ─────────────────────
 
@@ -158,14 +197,18 @@ function initPetClaw() {
 
   // ── Periodic state sync ───────────────────────────────
 
-  setInterval(async () => {
+  let syncTimer: ReturnType<typeof setInterval> | null = setInterval(async () => {
+    if (!isContextValid()) {
+      teardown()
+      return
+    }
     try {
       const response = await sendToBackground({ type: 'GET_STATE' })
       if (response.ok && response.state) {
         handleStateUpdate(response.state)
       }
     } catch {
-      // Service worker might be inactive, ignore
+      // sendToBackground already handles teardown if context is dead
     }
   }, 30_000)
 }
