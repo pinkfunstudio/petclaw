@@ -532,15 +532,31 @@ chrome.runtime.onInstalled.addListener(async () => {
     for (const tab of tabs) {
       if (!tab.id) continue
       try {
-        // Step 1: Inject inline cleanup FIRST — suppresses errors from
-        // old orphaned scripts and removes stale DOM, BEFORE the new
-        // content script loads.
+        // Step 1a: Inject cleanup into the MAIN world.
+        // Content-script timers (setInterval/setTimeout) share the
+        // same timer-ID pool as the page, so clearing them from MAIN
+        // world DOES kill the old orphaned content-script timers.
+        // Error handlers registered here also act as a last-resort
+        // safety net for errors Chrome surfaces to the page console.
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
+          world: 'MAIN',
           func: () => {
-            // Suppress errors from old orphaned content scripts
+            // ── Kill orphaned PetClaw timers ────────────────
+            const oldContainer = document.getElementById('petclaw-container')
+            if (oldContainer) {
+              const storedId = oldContainer.dataset.petclawSyncTimer
+              if (storedId) {
+                clearInterval(Number(storedId))
+              }
+              // Mark as dead via DOM attribute (visible to all worlds)
+              oldContainer.dataset.petclawDead = '1'
+            }
+
+            // ── Suppress errors surfaced to page console ────
             window.addEventListener('unhandledrejection', (e) => {
-              if (String((e as any).reason).includes('Extension context invalidated')) {
+              const msg = String((e as any).reason?.message || (e as any).reason || '')
+              if (msg.includes('Extension context invalidated')) {
                 e.preventDefault()
               }
             })
@@ -549,9 +565,38 @@ chrome.runtime.onInstalled.addListener(async () => {
                 e.preventDefault()
               }
             })
-            // Remove stale container
-            const old = document.getElementById('petclaw-container')
-            if (old) old.remove()
+          },
+        })
+
+        // Step 1b: Inject cleanup into the ISOLATED world (the new
+        // extension's isolated world).  Although this cannot reach the
+        // OLD isolated world directly, setting error handlers here
+        // ensures the new content script's world is also covered.
+        // We also read the timer ID from the DOM (shared across worlds)
+        // and clear it — belt-and-suspenders alongside the MAIN world clear.
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            // Clear timer via DOM-shared data attribute
+            const oldContainer = document.getElementById('petclaw-container')
+            if (oldContainer) {
+              const storedId = oldContainer.dataset.petclawSyncTimer
+              if (storedId) clearInterval(Number(storedId))
+              oldContainer.remove()
+            }
+
+            // Error handlers in new isolated world
+            window.addEventListener('unhandledrejection', (e) => {
+              const msg = String((e as any).reason?.message || (e as any).reason || '')
+              if (msg.includes('Extension context invalidated')) {
+                e.preventDefault()
+              }
+            })
+            window.addEventListener('error', (e) => {
+              if (e.message?.includes('Extension context invalidated')) {
+                e.preventDefault()
+              }
+            })
           },
         })
         // Step 2: Now inject the fresh content script + CSS

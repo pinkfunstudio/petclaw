@@ -1526,7 +1526,11 @@
   });
   {
     const existing = document.getElementById("petclaw-container");
-    if (existing) existing.remove();
+    if (existing) {
+      const oldTimerId = existing.dataset.petclawSyncTimer;
+      if (oldTimerId) clearInterval(Number(oldTimerId));
+      existing.remove();
+    }
     initPetClaw();
   }
   function initPetClaw() {
@@ -1617,29 +1621,40 @@
     }
     init();
     if (isContextValid()) {
-      chrome.runtime.onMessage.addListener(
-        (message, _sender, _sendResponse) => {
-          if (!isContextValid()) return false;
-          switch (message.type) {
-            case "STATE_UPDATE":
-              handleStateUpdate(message.state);
-              break;
-            case "LLM_CHUNK":
-              chatUI.appendChunk(message.text);
-              break;
-            case "LLM_DONE":
-              chatUI.finishStreaming(message.fullText);
-              break;
-            case "PET_SPEAK":
-              chatUI.showBubble(message.text);
-              if (chatUI.panelOpen) {
-                chatUI.appendMessage("pet", message.text);
+      try {
+        chrome.runtime.onMessage.addListener(
+          (message, _sender, _sendResponse) => {
+            try {
+              if (!isContextValid()) return false;
+              switch (message.type) {
+                case "STATE_UPDATE":
+                  handleStateUpdate(message.state);
+                  break;
+                case "LLM_CHUNK":
+                  chatUI.appendChunk(message.text);
+                  break;
+                case "LLM_DONE":
+                  chatUI.finishStreaming(message.fullText);
+                  break;
+                case "PET_SPEAK":
+                  chatUI.showBubble(message.text);
+                  if (chatUI.panelOpen) {
+                    chatUI.appendMessage("pet", message.text);
+                  }
+                  break;
               }
-              break;
+            } catch (err) {
+              if (err?.message?.includes("Extension context invalidated")) {
+                teardown();
+                return false;
+              }
+              throw err;
+            }
+            return false;
           }
-          return false;
-        }
-      );
+        );
+      } catch {
+      }
     }
     pet.onClick(() => {
       chatUI.toggle();
@@ -1686,6 +1701,9 @@
       } catch {
       }
     }, 3e4);
+    if (syncTimer != null) {
+      container.dataset.petclawSyncTimer = String(syncTimer);
+    }
   }
 })();
 //# sourceMappingURL=content.js.map

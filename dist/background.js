@@ -1024,9 +1024,19 @@ chrome.runtime.onInstalled.addListener(async () => {
       try {
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
+          world: "MAIN",
           func: () => {
+            const oldContainer = document.getElementById("petclaw-container");
+            if (oldContainer) {
+              const storedId = oldContainer.dataset.petclawSyncTimer;
+              if (storedId) {
+                clearInterval(Number(storedId));
+              }
+              oldContainer.dataset.petclawDead = "1";
+            }
             window.addEventListener("unhandledrejection", (e) => {
-              if (String(e.reason).includes("Extension context invalidated")) {
+              const msg = String(e.reason?.message || e.reason || "");
+              if (msg.includes("Extension context invalidated")) {
                 e.preventDefault();
               }
             });
@@ -1035,8 +1045,28 @@ chrome.runtime.onInstalled.addListener(async () => {
                 e.preventDefault();
               }
             });
-            const old = document.getElementById("petclaw-container");
-            if (old) old.remove();
+          }
+        });
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const oldContainer = document.getElementById("petclaw-container");
+            if (oldContainer) {
+              const storedId = oldContainer.dataset.petclawSyncTimer;
+              if (storedId) clearInterval(Number(storedId));
+              oldContainer.remove();
+            }
+            window.addEventListener("unhandledrejection", (e) => {
+              const msg = String(e.reason?.message || e.reason || "");
+              if (msg.includes("Extension context invalidated")) {
+                e.preventDefault();
+              }
+            });
+            window.addEventListener("error", (e) => {
+              if (e.message?.includes("Extension context invalidated")) {
+                e.preventDefault();
+              }
+            });
           }
         });
         await chrome.scripting.executeScript({

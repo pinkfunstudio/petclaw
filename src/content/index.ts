@@ -17,17 +17,14 @@ import { ChatUI } from './chat'
 
 // ── Suppress errors from old orphaned content scripts ──────
 // After extension reload, old scripts keep running with a dead
-// chrome.runtime.  Their unhandled rejections cannot be caught
-// by the old code.  This handler runs in the SAME window and
-// silently suppresses those specific errors.
-// Catch async rejections from orphaned scripts
+// chrome.runtime.  These handlers catch errors from both old and
+// new contexts.
 window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
   const msg = e.reason?.message || String(e.reason || '')
   if (msg.includes('Extension context invalidated')) {
     e.preventDefault()
   }
 })
-// Catch synchronous throws from orphaned scripts (e.g. chrome.runtime.onMessage dispatch)
 window.addEventListener('error', (e: ErrorEvent) => {
   if (e.message?.includes('Extension context invalidated')) {
     e.preventDefault()
@@ -37,7 +34,12 @@ window.addEventListener('error', (e: ErrorEvent) => {
 // ── Remove stale container and (re)initialize ───────────────
 {
   const existing = document.getElementById('petclaw-container')
-  if (existing) existing.remove()
+  if (existing) {
+    // Clear old sync timer before removing
+    const oldTimerId = existing.dataset.petclawSyncTimer
+    if (oldTimerId) clearInterval(Number(oldTimerId))
+    existing.remove()
+  }
   initPetClaw()
 }
 
@@ -144,32 +146,44 @@ function initPetClaw() {
   // ── Listen for messages from background ───────────────
 
   if (isContextValid()) {
-    chrome.runtime.onMessage.addListener(
-      (message: MessageToContent, _sender, _sendResponse) => {
-        if (!isContextValid()) return false
-        switch (message.type) {
-          case 'STATE_UPDATE':
-            handleStateUpdate(message.state)
-            break
+    try {
+      chrome.runtime.onMessage.addListener(
+        (message: MessageToContent, _sender, _sendResponse) => {
+          try {
+            if (!isContextValid()) return false
+            switch (message.type) {
+              case 'STATE_UPDATE':
+                handleStateUpdate(message.state)
+                break
 
-          case 'LLM_CHUNK':
-            chatUI.appendChunk(message.text)
-            break
+              case 'LLM_CHUNK':
+                chatUI.appendChunk(message.text)
+                break
 
-          case 'LLM_DONE':
-            chatUI.finishStreaming(message.fullText)
-            break
+              case 'LLM_DONE':
+                chatUI.finishStreaming(message.fullText)
+                break
 
-          case 'PET_SPEAK':
-            chatUI.showBubble(message.text)
-            if (chatUI.panelOpen) {
-              chatUI.appendMessage('pet', message.text)
+              case 'PET_SPEAK':
+                chatUI.showBubble(message.text)
+                if (chatUI.panelOpen) {
+                  chatUI.appendMessage('pet', message.text)
+                }
+                break
             }
-            break
-        }
-        return false
-      },
-    )
+          } catch (err: any) {
+            if (err?.message?.includes('Extension context invalidated')) {
+              teardown()
+              return false
+            }
+            throw err
+          }
+          return false
+        },
+      )
+    } catch {
+      // Context already invalidated before we could add listener
+    }
   }
 
   // ── Pet click → toggle chat panel ─────────────────────
@@ -232,4 +246,10 @@ function initPetClaw() {
       // sendToBackground already handles teardown if context is dead
     }
   }, 30_000)
+
+  // Store sync timer ID on the container so the cleanup script
+  // (injected on extension reload) can find and clear it.
+  if (syncTimer != null) {
+    container.dataset.petclawSyncTimer = String(syncTimer)
+  }
 }
