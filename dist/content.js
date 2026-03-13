@@ -1992,7 +1992,7 @@
         <button class="send-btn">Send</button>
       </div>
       <div class="petclaw-footer">
-        &copy; <a href="https://github.com/pinkfunstudio" target="_blank">PinkFun Studio</a> &middot; MIT License
+        &copy; <a href="https://github.com/pinkfunstudio" target="_blank">PinkFun Studio</a> &middot; <a href="https://x.com/PinkFunStudio" target="_blank">@PinkFunStudio</a>
       </div>
     `;
       shadowRoot.appendChild(this.panelEl);
@@ -2000,6 +2000,7 @@
       this.contextMenuEl.className = "petclaw-context-menu";
       this.contextMenuEl.innerHTML = `
       <button data-action="settings">Settings</button>
+      <button data-action="update">Update Files</button>
       <button data-action="export">Export Files</button>
       <button data-action="hide">Hide Pet</button>
     `;
@@ -2009,6 +2010,7 @@
           const action = btn.dataset.action;
           this.hideContextMenu();
           if (action === "settings") this._onContextMenuAction?.("settings");
+          else if (action === "update") this._onContextMenuAction?.("update");
           else if (action === "export") this._onContextMenuAction?.("export");
           else if (action === "hide") this._onContextMenuAction?.("hide");
         });
@@ -2793,6 +2795,15 @@
           });
         } catch {
         }
+      } else if (action === "update") {
+        void sendToBackground({ type: "EXPORT" }).then((response) => {
+          if (response.ok) {
+            pet.setAction("happy");
+            chatUI.showBubble("Files updated!");
+          } else {
+            chatUI.showBubble("Update failed...");
+          }
+        });
       } else if (action === "export") {
         void sendToBackground({ type: "EXPORT" }).then((response) => {
           if (response.ok && response.exportData) {

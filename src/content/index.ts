@@ -414,6 +414,16 @@ function initPetClaw() {
       try {
         chrome.runtime.sendMessage({ type: 'OPEN_POPUP' }).catch(() => {})
       } catch { /* ignore */ }
+    } else if (action === 'update') {
+      // Regenerate the 4 config files without downloading
+      void sendToBackground({ type: 'EXPORT' }).then(response => {
+        if (response.ok) {
+          pet.setAction('happy')
+          chatUI.showBubble('Files updated!')
+        } else {
+          chatUI.showBubble('Update failed...')
+        }
+      })
     } else if (action === 'export') {
       void sendToBackground({ type: 'EXPORT' }).then(response => {
         if (response.ok && response.exportData) {
