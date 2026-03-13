@@ -151,6 +151,7 @@ export type MessageToBackground =
   | { type: 'SYNC_POSITION'; x: number; direction: 1 | -1 }
   | { type: 'GET_CHAT_HISTORY' }
   | { type: 'WAKE_PET' }
+  | { type: 'OPEN_POPUP' }
 
 export type MessageToContent =
   | { type: 'STATE_UPDATE'; state: PetState }

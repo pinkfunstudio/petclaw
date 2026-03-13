@@ -600,6 +600,19 @@ async function handleMessage(
       return { ok: true, state }
     }
 
+    // ── OPEN_POPUP ──────────────────────────────────────
+    case 'OPEN_POPUP': {
+      try {
+        await chrome.action.openPopup()
+        return { ok: true }
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }
+      }
+    }
+
     // ── EXPORT ────────────────────────────────────────
     case 'EXPORT': {
       const state = await getPetState()
@@ -764,9 +777,9 @@ chrome.runtime.onInstalled.addListener(async () => {
             const oldContainer = document.getElementById('petclaw-container')
             if (oldContainer) {
               const storedId = oldContainer.dataset.petclawSyncTimer
-              if (storedId) {
-                clearInterval(Number(storedId))
-              }
+              if (storedId) clearInterval(Number(storedId))
+              const oldPosTimerId = oldContainer.dataset.petclawPositionTimer
+              if (oldPosTimerId) clearInterval(Number(oldPosTimerId))
               // Mark as dead via DOM attribute (visible to all worlds)
               oldContainer.dataset.petclawDead = '1'
             }
@@ -800,6 +813,8 @@ chrome.runtime.onInstalled.addListener(async () => {
             if (oldContainer) {
               const storedId = oldContainer.dataset.petclawSyncTimer
               if (storedId) clearInterval(Number(storedId))
+              const oldPosTimerId = oldContainer.dataset.petclawPositionTimer
+              if (oldPosTimerId) clearInterval(Number(oldPosTimerId))
               oldContainer.remove()
             }
 

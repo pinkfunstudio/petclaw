@@ -1304,6 +1304,18 @@ async function handleMessage(msg, sender) {
       }
       return { ok: true, state };
     }
+    // ── OPEN_POPUP ──────────────────────────────────────
+    case "OPEN_POPUP": {
+      try {
+        await chrome.action.openPopup();
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err)
+        };
+      }
+    }
     // ── EXPORT ────────────────────────────────────────
     case "EXPORT": {
       const state = await getPetState();
@@ -1421,9 +1433,9 @@ chrome.runtime.onInstalled.addListener(async () => {
             const oldContainer = document.getElementById("petclaw-container");
             if (oldContainer) {
               const storedId = oldContainer.dataset.petclawSyncTimer;
-              if (storedId) {
-                clearInterval(Number(storedId));
-              }
+              if (storedId) clearInterval(Number(storedId));
+              const oldPosTimerId = oldContainer.dataset.petclawPositionTimer;
+              if (oldPosTimerId) clearInterval(Number(oldPosTimerId));
               oldContainer.dataset.petclawDead = "1";
             }
             window.addEventListener("unhandledrejection", (e) => {
@@ -1446,6 +1458,8 @@ chrome.runtime.onInstalled.addListener(async () => {
             if (oldContainer) {
               const storedId = oldContainer.dataset.petclawSyncTimer;
               if (storedId) clearInterval(Number(storedId));
+              const oldPosTimerId = oldContainer.dataset.petclawPositionTimer;
+              if (oldPosTimerId) clearInterval(Number(oldPosTimerId));
               oldContainer.remove();
             }
             window.addEventListener("unhandledrejection", (e) => {

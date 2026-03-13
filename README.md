@@ -16,7 +16,7 @@ PetClaw is a Chrome Extension that puts a pixel-art lobster on every webpage. Fe
 
 **LLM Chat** — Real-time streaming conversations via Claude, MiniMax, DeepSeek, or any OpenAI-compatible endpoint. The pet's personality adapts as it grows. Shadow DOM isolation keeps the UI clean.
 
-**Passive Learning** — Tracks your active hours, topic interests (10 categories), browsing domains (opt-in), feedback style, and response length patterns — all stored locally, never sent anywhere.
+**Passive Learning** — Tracks your active hours, topic interests (10 categories), browsing domains (opt-in), feedback style, and response length patterns. This data is stored locally in the extension; only the chat and optional dream-analysis requests you trigger are sent to your configured LLM provider.
 
 **OpenClaw Export** — Automatically generates 4 config files after each interaction, exported as a single ZIP:
 - `SOUL.md` — Core personality, boundaries, vibe, and closing
