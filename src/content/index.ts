@@ -22,7 +22,6 @@ import type {
 import { Pet } from './pet'
 import { ChatUI } from './chat'
 import { ElementScanner } from './elements'
-import { setLang } from '../shared/i18n'
 
 const ACTIVE_INSTANCE_KEY = 'petclawActiveInstance'
 const SHUTDOWN_EVENT = 'petclaw:shutdown'
@@ -304,9 +303,6 @@ function initPetClaw() {
       const response = await sendToBackground({ type: 'INIT' })
       if (response.ok && response.state) {
         handleStateUpdate(response.state)
-      }
-      if (response.ok && response.settings) {
-        setLang(response.settings.language)
       }
       // Load chat history from storage
       if (response.ok && response.chatHistory && response.chatHistory.length > 0) {

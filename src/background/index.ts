@@ -64,11 +64,11 @@ function scheduleExportRegen(): void {
 const STAGE_ORDER: PetStage[] = ['egg', 'baby', 'young', 'teen', 'adult']
 
 const EVOLUTION_EVENTS: Record<PetStage, string> = {
-  egg: '一颗神秘的蛋出现了',
-  baby: '蛋裂开了！一个小生命诞生了 🐣',
-  young: '开始好奇地探索世界',
-  teen: '性格逐渐成型，有了自己的想法',
-  adult: '完全成熟，拥有独特的灵魂',
+  egg: 'A mysterious egg appeared',
+  baby: 'The egg cracked open! A new life is born',
+  young: 'Started curiously exploring the world',
+  teen: 'Personality taking shape, developing its own opinions',
+  adult: 'Fully mature, possessing a unique soul',
 }
 
 function checkEvolution(state: PetState): PetState {
@@ -98,9 +98,8 @@ function checkEvolution(state: PetState): PetState {
 
 // ── System prompt builder ───────────────────────────────
 
-function buildSystemPrompt(state: PetState, memory: MemoryStore, settings: Settings): string {
+function buildSystemPrompt(state: PetState, memory: MemoryStore, _settings: Settings): string {
   const p = state.personality
-  const lang = settings.language === 'auto' ? 'zh' : settings.language
 
   // Recent context from memory
   const recentPrefs = memory.preferences.slice(-3).map(p => p.key).join(', ')
@@ -119,19 +118,19 @@ function buildSystemPrompt(state: PetState, memory: MemoryStore, settings: Setti
 
   switch (state.stage) {
     case 'egg':
-      return `You are an egg named ${state.name}. You can only make sounds and vibrations. Respond ONLY with sound effects like "*crack crack*", "*wobble wobble*", "*warm~*", "*咔嚓*", "*摇晃*". Never use real words or sentences. Keep responses under 10 characters.`
+      return `You are an egg named ${state.name}. You can only make sounds and vibrations. Respond ONLY with sound effects like "*crack crack*", "*wobble wobble*", "*warm~*", "*rumble*". Never use real words or sentences. Keep responses under 10 characters.`
 
     case 'baby':
-      return `You are a baby pet named ${state.name}. You just hatched and can barely speak. Use only 1-3 broken words, baby sounds, and emotive expressions. Examples: "...食物？", "...困困", "mama?", "*yawn*", "...好奇". ${lang === 'zh' ? 'Prefer Chinese baby talk.' : 'Prefer English baby talk.'} Keep responses under 15 characters.`
+      return `You are a baby pet named ${state.name}. You just hatched and can barely speak. Use only 1-3 broken words, baby sounds, and emotive expressions. Examples: "...food?", "...sleepy", "mama?", "*yawn*", "...curious". Keep responses under 15 characters.`
 
     case 'young':
-      return `You are a young pet named ${state.name}. You speak in short, curious sentences like a child. Ask lots of questions. Be excited about everything. ${lang === 'zh' ? 'Use simple Chinese.' : 'Use simple English.'} ${personalityDesc ? `Your personality: ${personalityDesc}.` : ''} Keep responses under 40 characters.${memoryContext}`
+      return `You are a young pet named ${state.name}. You speak in short, curious sentences like a child. Ask lots of questions. Be excited about everything. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ''} Keep responses under 40 characters.${memoryContext}`
 
     case 'teen':
-      return `You are a teenage pet named ${state.name}. You speak in full sentences with developing personality. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ''} ${lang === 'zh' ? 'Respond in Chinese.' : 'Respond in English.'} You can discuss topics your human has taught you. Be opinionated but still growing. Keep responses under 80 characters.${memoryContext}`
+      return `You are a teenage pet named ${state.name}. You speak in full sentences with developing personality. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ''} You can discuss topics your human has taught you. Be opinionated but still growing. Keep responses under 80 characters.${memoryContext}`
 
     case 'adult':
-      return `You are ${state.name}, a fully mature digital pet companion. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ''} Personality vectors: introvert/extrovert=${p.introvert_extrovert.toFixed(1)}, serious/playful=${p.serious_playful.toFixed(1)}, cautious/bold=${p.cautious_bold.toFixed(1)}, formal/casual=${p.formal_casual.toFixed(1)}. ${lang === 'zh' ? 'Respond in Chinese.' : 'Respond in English.'} Speak naturally with your established personality. Be a thoughtful companion. Keep responses under 120 characters.${memoryContext}`
+      return `You are ${state.name}, a fully mature digital pet companion. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ''} Personality vectors: introvert/extrovert=${p.introvert_extrovert.toFixed(1)}, serious/playful=${p.serious_playful.toFixed(1)}, cautious/bold=${p.cautious_bold.toFixed(1)}, formal/casual=${p.formal_casual.toFixed(1)}. Speak naturally with your established personality. Be a thoughtful companion. Keep responses under 120 characters.${memoryContext}`
 
     default:
       return `You are a pet named ${state.name}. Be friendly and concise.`
@@ -153,9 +152,7 @@ function extractMemory(message: string, memory: MemoryStore): MemoryStore {
   // Detect preferences: "I like/love/prefer/hate/dislike..."
   const prefPatterns = [
     /(?:i\s+(?:like|love|prefer|enjoy))\s+(.+?)(?:\.|,|!|$)/i,
-    /(?:我(?:喜欢|爱|偏好|想要))\s*(.+?)(?:\.|,|。|，|！|$)/,
     /(?:i\s+(?:hate|dislike|don't like))\s+(.+?)(?:\.|,|!|$)/i,
-    /(?:我(?:不喜欢|讨厌|不想))\s*(.+?)(?:\.|,|。|，|！|$)/,
   ]
 
   for (const pattern of prefPatterns) {
@@ -185,9 +182,9 @@ function extractMemory(message: string, memory: MemoryStore): MemoryStore {
   // Detect knowledge: "X is/means/does Y" patterns or named entities
   const knowledgePatterns = [
     /(?:my name is|i'm called|i am)\s+(.+?)(?:\.|,|!|$)/i,
-    /(?:我(?:叫|是|名字是))\s*(.+?)(?:\.|,|。|，|！|$)/,
     /(?:i work (?:at|on|in|for))\s+(.+?)(?:\.|,|!|$)/i,
-    /(?:我(?:在|做))\s*(.+?)(?:工作|上班)(?:\.|,|。|，|！|$)/,
+    /(?:i live (?:in|at|near))\s+(.+?)(?:\.|,|!|$)/i,
+    /(?:i'm a|i am a|i'm an|i am an)\s+(.+?)(?:\.|,|!|$)/i,
   ]
 
   for (const pattern of knowledgePatterns) {
@@ -226,11 +223,11 @@ function nudgePersonality(state: PetState, message: string): PetState {
   const updated = { ...state, personality: { ...state.personality } }
 
   // Playful interaction nudges serious_playful up
-  if (/haha|lol|😂|🤣|哈哈|笑|funny|joke/i.test(lower)) {
+  if (/haha|lol|😂|🤣|funny|joke|lmao|rofl/i.test(lower)) {
     updated.personality.serious_playful = Math.min(1, updated.personality.serious_playful + PERSONALITY_SHIFT)
   }
   // Serious questions nudge the other way
-  if (/why|how does|explain|分析|为什么|怎么/i.test(lower)) {
+  if (/why|how does|explain|analyze|what causes|tell me about/i.test(lower)) {
     updated.personality.serious_playful = Math.max(-1, updated.personality.serious_playful - PERSONALITY_SHIFT)
   }
 
@@ -240,7 +237,7 @@ function nudgePersonality(state: PetState, message: string): PetState {
   }
 
   // Casual language nudges formal_casual up
-  if (/lol|lmao|heh|btw|imo|tbh|ngl|哈|嘿|嗯|呢/i.test(lower)) {
+  if (/lol|lmao|heh|btw|imo|tbh|ngl|bruh|nah|yep|gonna/i.test(lower)) {
     updated.personality.formal_casual = Math.min(1, updated.personality.formal_casual + PERSONALITY_SHIFT)
   }
 

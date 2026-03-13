@@ -42,12 +42,67 @@ export const MAX_MEMORY_ENTRIES = 100
 export const BUBBLE_DURATION = 5000                // auto-hide bubble after 5s
 
 // ── Stage display names ────────────────────────────────
-export const STAGE_NAMES: Record<PetStage, { zh: string; en: string }> = {
-  egg:   { zh: '蛋', en: 'Egg' },
-  baby:  { zh: '幼年', en: 'Baby' },
-  young: { zh: '少年', en: 'Young' },
-  teen:  { zh: '青年', en: 'Teen' },
-  adult: { zh: '成年', en: 'Adult' },
+export const STAGE_NAMES: Record<PetStage, string> = {
+  egg: 'Egg',
+  baby: 'Baby',
+  young: 'Young',
+  teen: 'Teen',
+  adult: 'Adult',
+}
+
+// ── LLM Provider presets ───────────────────────────────
+export interface ProviderPreset {
+  label: string
+  baseUrl: string
+  model: string
+}
+
+export const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
+  minimax: {
+    label: 'MiniMax',
+    baseUrl: 'https://api.minimax.io/v1',
+    model: 'MiniMax-M2.5-Lightning',
+  },
+  claude: {
+    label: 'Claude (Anthropic)',
+    baseUrl: 'https://api.anthropic.com/v1',
+    model: 'claude-sonnet-4-20250514',
+  },
+  openai: {
+    label: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+  },
+  deepseek: {
+    label: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat',
+  },
+  gemini: {
+    label: 'Gemini (Google)',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    model: 'gemini-2.0-flash',
+  },
+  groq: {
+    label: 'Groq',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    model: 'llama-3.3-70b-versatile',
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model: 'anthropic/claude-sonnet-4',
+  },
+  ollama: {
+    label: 'Ollama (Local)',
+    baseUrl: 'http://localhost:11434/v1',
+    model: 'llama3.2',
+  },
+  'openai-compatible': {
+    label: 'OpenAI Compatible',
+    baseUrl: '',
+    model: '',
+  },
 }
 
 // ── Default settings ───────────────────────────────────
@@ -58,6 +113,5 @@ export const DEFAULT_SETTINGS = {
   model: 'MiniMax-M2.5-Lightning',
   petName: 'Clawfish',
   enableBrowsingTracker: false,
-  language: 'en' as const,
   petVisible: true,
 }

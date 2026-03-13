@@ -121,14 +121,6 @@ export function generateSoul(state: PetState, profile: UserProfile, memory: Memo
   const age = daysOld(state.birthday)
   const truths = deriveCoreTruths(state.personality, profile)
 
-  // Language preference
-  const langs = topEntries(profile.language, 2)
-  const langLine = langs.length > 1
-    ? `Speaks primarily ${langs[0][0]}, with some ${langs[1][0]}.`
-    : langs.length === 1
-      ? `Speaks ${langs[0][0]}.`
-      : ''
-
   // Known preferences from memory
   const knownPrefs = memory.preferences
     .filter(pf => pf.confidence >= 0.4)
@@ -152,7 +144,7 @@ ${truths.map(t => `- ${t}`).join('\n')}
 
 ## Vibe
 
-${deriveVibe(state.personality)} ${langLine}
+${deriveVibe(state.personality)}
 ${age > 14 ? 'Knows the human well — shaped by ' + state.totalMessages + ' conversations.' : 'Still getting to know its human.'}
 ${knownPrefs ? '\nThings I know matter to my human:\n' + knownPrefs : ''}
 
@@ -175,7 +167,7 @@ export function generateMemory(state: PetState, memory: MemoryStore): string {
     sections.push('')
     for (const m of state.milestones) {
       const stageName = STAGE_NAMES[m.stage]
-      sections.push(`- **Day ${m.day}** — ${m.event} _(became ${stageName.en} / ${stageName.zh})_`)
+      sections.push(`- **Day ${m.day}** — ${m.event} _(became ${stageName})_`)
     }
     sections.push('')
   }
@@ -261,14 +253,6 @@ export function generateUser(profile: UserProfile): string {
     .slice(0, 3)
     .map(d => dayNames[d.day])
 
-  // Language distribution
-  const langs = topEntries(profile.language, 5)
-  const totalLangCount = Object.values(profile.language).reduce((a, b) => a + b, 0)
-  const langLines = langs.map(([lang, count]) => {
-    const pct = totalLangCount > 0 ? Math.round((count / totalLangCount) * 100) : 0
-    return `${lang}: ${pct}%`
-  })
-
   // Topic interests
   const topics = topEntries(profile.topicDistribution, 8)
   const topicLines = topics.map(([topic]) => topic)
@@ -284,10 +268,6 @@ export function generateUser(profile: UserProfile): string {
 - **First seen:** ${formatDate(profile.firstSeen)}
 - **Sessions:** ${profile.totalSessions}
 - **Notes:** ${scheduleNote}
-
-## Language
-
-${langLines.length > 0 ? langLines.join(', ') : 'Not enough data yet'}
 
 ## Context
 

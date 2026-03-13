@@ -57,7 +57,7 @@ export function createDefaultPetState(name: string): PetState {
     milestones: [{
       day: 1,
       stage: 'egg',
-      event: '一颗神秘的蛋出现了',
+      event: 'A mysterious egg appeared',
     }],
     x: 200,
     y: 0,
@@ -80,7 +80,6 @@ export async function getUserProfile(): Promise<UserProfile> {
     activeDays: new Array(7).fill(0),
     totalSessions: 0,
     avgSessionLength: 0,
-    language: {},
     toneStats: {},
     topicDistribution: {},
     autonomyPreference: 0.5,

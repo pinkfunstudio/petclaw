@@ -5,11 +5,58 @@
   var PROACTIVE_SPEAK_INTERVAL = 30 * 60 * 1e3;
   var IDLE_THRESHOLD = 2 * 60 * 60 * 1e3;
   var STAGE_NAMES = {
-    egg: { zh: "\u86CB", en: "Egg" },
-    baby: { zh: "\u5E7C\u5E74", en: "Baby" },
-    young: { zh: "\u5C11\u5E74", en: "Young" },
-    teen: { zh: "\u9752\u5E74", en: "Teen" },
-    adult: { zh: "\u6210\u5E74", en: "Adult" }
+    egg: "Egg",
+    baby: "Baby",
+    young: "Young",
+    teen: "Teen",
+    adult: "Adult"
+  };
+  var PROVIDER_PRESETS = {
+    minimax: {
+      label: "MiniMax",
+      baseUrl: "https://api.minimax.io/v1",
+      model: "MiniMax-M2.5-Lightning"
+    },
+    claude: {
+      label: "Claude (Anthropic)",
+      baseUrl: "https://api.anthropic.com/v1",
+      model: "claude-sonnet-4-20250514"
+    },
+    openai: {
+      label: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4o-mini"
+    },
+    deepseek: {
+      label: "DeepSeek",
+      baseUrl: "https://api.deepseek.com/v1",
+      model: "deepseek-chat"
+    },
+    gemini: {
+      label: "Gemini (Google)",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      model: "gemini-2.0-flash"
+    },
+    groq: {
+      label: "Groq",
+      baseUrl: "https://api.groq.com/openai/v1",
+      model: "llama-3.3-70b-versatile"
+    },
+    openrouter: {
+      label: "OpenRouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "anthropic/claude-sonnet-4"
+    },
+    ollama: {
+      label: "Ollama (Local)",
+      baseUrl: "http://localhost:11434/v1",
+      model: "llama3.2"
+    },
+    "openai-compatible": {
+      label: "OpenAI Compatible",
+      baseUrl: "",
+      model: ""
+    }
   };
 
   // src/popup/index.ts
@@ -43,7 +90,7 @@
   }
   function renderState(s) {
     $("pet-name").textContent = s.name;
-    $("pet-stage").textContent = `${STAGE_NAMES[s.stage].en}`;
+    $("pet-stage").textContent = STAGE_NAMES[s.stage] || s.stage;
     const days = Math.max(1, Math.ceil((Date.now() - s.birthday) / 864e5));
     $("pet-days").textContent = `Day ${days}`;
     setBar("hunger", s.hunger);
@@ -71,13 +118,24 @@
     el.style.left = `${left}%`;
     el.style.width = "10%";
   }
+  var providerSelect = $("input-provider");
+  providerSelect.addEventListener("change", () => {
+    const key = providerSelect.value;
+    const preset = PROVIDER_PRESETS[key];
+    if (preset) {
+      ;
+      $("input-baseurl").value = preset.baseUrl;
+      $("input-model").value = preset.model;
+      $("input-baseurl").placeholder = preset.baseUrl || "https://your-api-base-url";
+      $("input-model").placeholder = preset.model || "model-name";
+    }
+  });
   async function loadSettings() {
     try {
       const res = await send({ type: "GET_SETTINGS" });
       if (!res.ok || !res.settings) return;
       const s = res.settings;
       $("input-name").value = s.petName;
-      $("input-language").value = s.language;
       $("input-provider").value = s.provider;
       $("input-baseurl").value = s.apiBaseUrl;
       $("input-apikey").value = s.apiKey;
@@ -90,8 +148,7 @@
   }
   function readFormSettings() {
     return {
-      petName: $("input-name").value.trim() || "Clawdy",
-      language: $("input-language").value,
+      petName: $("input-name").value.trim() || "Clawfish",
       provider: $("input-provider").value,
       apiBaseUrl: $("input-baseurl").value.trim(),
       apiKey: $("input-apikey").value.trim(),
@@ -153,7 +210,7 @@
           "Content-Type": "application/json"
         };
         body = JSON.stringify({
-          model: model || "MiniMax-M2.5-Lightning",
+          model: model || "gpt-4o-mini",
           max_tokens: 10,
           messages: [
             { role: "system", content: "Reply with OK" },

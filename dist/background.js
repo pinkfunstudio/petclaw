@@ -22,11 +22,11 @@ var PERSONALITY_SHIFT = 0.02;
 var MAX_CHAT_HISTORY = 50;
 var MAX_MEMORY_ENTRIES = 100;
 var STAGE_NAMES = {
-  egg: { zh: "\u86CB", en: "Egg" },
-  baby: { zh: "\u5E7C\u5E74", en: "Baby" },
-  young: { zh: "\u5C11\u5E74", en: "Young" },
-  teen: { zh: "\u9752\u5E74", en: "Teen" },
-  adult: { zh: "\u6210\u5E74", en: "Adult" }
+  egg: "Egg",
+  baby: "Baby",
+  young: "Young",
+  teen: "Teen",
+  adult: "Adult"
 };
 var DEFAULT_SETTINGS = {
   provider: "minimax",
@@ -35,7 +35,6 @@ var DEFAULT_SETTINGS = {
   model: "MiniMax-M2.5-Lightning",
   petName: "Clawfish",
   enableBrowsingTracker: false,
-  language: "en",
   petVisible: true
 };
 
@@ -85,7 +84,7 @@ function createDefaultPetState(name) {
     milestones: [{
       day: 1,
       stage: "egg",
-      event: "\u4E00\u9897\u795E\u79D8\u7684\u86CB\u51FA\u73B0\u4E86"
+      event: "A mysterious egg appeared"
     }],
     x: 200,
     y: 0,
@@ -105,7 +104,6 @@ async function getUserProfile() {
     activeDays: new Array(7).fill(0),
     totalSessions: 0,
     avgSessionLength: 0,
-    language: {},
     toneStats: {},
     topicDistribution: {},
     autonomyPreference: 0.5,
@@ -391,8 +389,6 @@ function deriveVibe(p) {
 function generateSoul(state, profile, memory) {
   const age = daysOld(state.birthday);
   const truths = deriveCoreTruths(state.personality, profile);
-  const langs = topEntries(profile.language, 2);
-  const langLine = langs.length > 1 ? `Speaks primarily ${langs[0][0]}, with some ${langs[1][0]}.` : langs.length === 1 ? `Speaks ${langs[0][0]}.` : "";
   const knownPrefs = memory.preferences.filter((pf) => pf.confidence >= 0.4).slice(-5).map((pf) => `- ${pf.key}`).join("\n");
   return `# SOUL.md
 ${state.name} \u2014 raised from an egg over ${age} days of real interaction.
@@ -410,7 +406,7 @@ ${truths.map((t) => `- ${t}`).join("\n")}
 
 ## Vibe
 
-${deriveVibe(state.personality)} ${langLine}
+${deriveVibe(state.personality)}
 ${age > 14 ? "Knows the human well \u2014 shaped by " + state.totalMessages + " conversations." : "Still getting to know its human."}
 ${knownPrefs ? "\nThings I know matter to my human:\n" + knownPrefs : ""}
 
@@ -428,7 +424,7 @@ function generateMemory(state, memory) {
     sections.push("");
     for (const m of state.milestones) {
       const stageName = STAGE_NAMES[m.stage];
-      sections.push(`- **Day ${m.day}** \u2014 ${m.event} _(became ${stageName.en} / ${stageName.zh})_`);
+      sections.push(`- **Day ${m.day}** \u2014 ${m.event} _(became ${stageName})_`);
     }
     sections.push("");
   }
@@ -484,12 +480,6 @@ function generateUser(profile) {
   const peakHours = profile.activeHours.map((count, hour) => ({ hour, count })).sort((a, b) => b.count - a.count).filter((h) => h.count > 0).slice(0, 3).map((h) => `${String(h.hour).padStart(2, "0")}:00`);
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const peakDays = profile.activeDays.map((count, day) => ({ day, count })).sort((a, b) => b.count - a.count).filter((d) => d.count > 0).slice(0, 3).map((d) => dayNames[d.day]);
-  const langs = topEntries(profile.language, 5);
-  const totalLangCount = Object.values(profile.language).reduce((a, b) => a + b, 0);
-  const langLines = langs.map(([lang, count]) => {
-    const pct = totalLangCount > 0 ? Math.round(count / totalLangCount * 100) : 0;
-    return `${lang}: ${pct}%`;
-  });
   const topics = topEntries(profile.topicDistribution, 8);
   const topicLines = topics.map(([topic]) => topic);
   const scheduleNote = peakHours.length > 0 ? `Most active around ${peakHours.join(", ")}${peakDays.length > 0 ? `, especially on ${peakDays.join(", ")}` : ""}` : "Not enough data yet";
@@ -499,10 +489,6 @@ function generateUser(profile) {
 - **First seen:** ${formatDate(profile.firstSeen)}
 - **Sessions:** ${profile.totalSessions}
 - **Notes:** ${scheduleNote}
-
-## Language
-
-${langLines.length > 0 ? langLines.join(", ") : "Not enough data yet"}
 
 ## Context
 
@@ -541,29 +527,18 @@ function generateAll(state, profile, memory) {
 
 // src/background/tracker.ts
 var TOPIC_KEYWORDS = {
-  crypto: ["crypto", "blockchain", "bitcoin", "btc", "eth", "ethereum", "token", "defi", "nft", "web3", "wallet", "mining", "solana", "sol", "\u52A0\u5BC6", "\u533A\u5757\u94FE", "\u6BD4\u7279\u5E01", "\u4EE5\u592A\u574A", "\u4EE3\u5E01"],
-  dev: ["code", "coding", "programming", "typescript", "javascript", "python", "rust", "react", "api", "git", "github", "bug", "debug", "deploy", "docker", "database", "frontend", "backend", "server", "npm", "\u4EE3\u7801", "\u7F16\u7A0B", "\u5F00\u53D1", "\u90E8\u7F72"],
-  ai: ["ai", "llm", "gpt", "claude", "machine learning", "neural", "model", "training", "prompt", "chatbot", "\u4EBA\u5DE5\u667A\u80FD", "\u6A21\u578B", "\u8BAD\u7EC3"],
-  gaming: ["game", "gaming", "play", "steam", "xbox", "playstation", "nintendo", "rpg", "mmorpg", "\u6E38\u620F", "\u73A9"],
-  music: ["music", "song", "album", "band", "spotify", "playlist", "guitar", "piano", "\u97F3\u4E50", "\u6B4C"],
-  finance: ["stock", "market", "invest", "trading", "portfolio", "dividend", "fund", "etf", "\u80A1\u7968", "\u6295\u8D44", "\u4EA4\u6613", "\u57FA\u91D1"],
-  design: ["design", "figma", "ui", "ux", "css", "layout", "color", "font", "typography", "\u8BBE\u8BA1", "\u754C\u9762"],
-  food: ["food", "cook", "recipe", "restaurant", "coffee", "tea", "eat", "lunch", "dinner", "\u5403", "\u505A\u996D", "\u98DF\u7269", "\u5496\u5561", "\u8336"],
-  health: ["exercise", "workout", "gym", "run", "yoga", "sleep", "health", "weight", "\u8FD0\u52A8", "\u953B\u70BC", "\u5065\u8EAB", "\u5065\u5EB7", "\u7761\u7720"],
-  travel: ["travel", "trip", "flight", "hotel", "city", "country", "vacation", "\u65C5\u884C", "\u65C5\u6E38", "\u51FA\u884C"]
+  crypto: ["crypto", "blockchain", "bitcoin", "btc", "eth", "ethereum", "token", "defi", "nft", "web3", "wallet", "mining", "solana", "sol", "memecoin", "airdrop"],
+  dev: ["code", "coding", "programming", "typescript", "javascript", "python", "rust", "react", "api", "git", "github", "bug", "debug", "deploy", "docker", "database", "frontend", "backend", "server", "npm"],
+  ai: ["ai", "llm", "gpt", "claude", "machine learning", "neural", "model", "training", "prompt", "chatbot", "openai", "anthropic", "gemini"],
+  gaming: ["game", "gaming", "play", "steam", "xbox", "playstation", "nintendo", "rpg", "mmorpg", "esports"],
+  music: ["music", "song", "album", "band", "spotify", "playlist", "guitar", "piano", "concert"],
+  finance: ["stock", "market", "invest", "trading", "portfolio", "dividend", "fund", "etf", "bonds", "forex"],
+  design: ["design", "figma", "ui", "ux", "css", "layout", "color", "font", "typography", "logo"],
+  food: ["food", "cook", "recipe", "restaurant", "coffee", "tea", "eat", "lunch", "dinner", "breakfast"],
+  health: ["exercise", "workout", "gym", "run", "yoga", "sleep", "health", "weight", "fitness", "diet"],
+  travel: ["travel", "trip", "flight", "hotel", "city", "country", "vacation", "beach", "hiking"]
 };
 var ENCOURAGING_WORDS = [
-  "\u597D",
-  "\u68D2",
-  "\u5389\u5BB3",
-  "\u4E0D\u9519",
-  "\u53EF\u4EE5",
-  "\u559C\u6B22",
-  "\u7231",
-  "\u8D5E",
-  "\u5BF9",
-  "\u6CA1\u9519",
-  "\u6B63\u786E",
   "great",
   "good",
   "nice",
@@ -583,18 +558,11 @@ var ENCOURAGING_WORDS = [
   "bravo",
   "fantastic",
   "wonderful",
-  "brilliant"
+  "brilliant",
+  "exactly",
+  "impressive"
 ];
 var STRICT_WORDS = [
-  "\u4E0D\u5BF9",
-  "\u9519\u4E86",
-  "\u4E0D\u662F",
-  "\u4E0D\u597D",
-  "\u5DEE",
-  "\u70C2",
-  "\u4E0D\u884C",
-  "\u91CD\u6765",
-  "\u518D\u8BD5",
   "wrong",
   "no",
   "bad",
@@ -608,14 +576,9 @@ var STRICT_WORDS = [
   "mistake",
   "fail",
   "poor",
-  "worse"
+  "worse",
+  "nope"
 ];
-var CJK_RANGE = /[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uffef]/g;
-function detectLanguage(text) {
-  const cjkMatches = text.match(CJK_RANGE);
-  const cjkRatio = cjkMatches ? cjkMatches.length / text.length : 0;
-  return cjkRatio > 0.15 ? "zh" : "en";
-}
 function trackActivity(profile) {
   const now = /* @__PURE__ */ new Date();
   const hour = now.getHours();
@@ -638,11 +601,6 @@ function trackActivity(profile) {
 function trackMessage(profile, message, isUser) {
   const updated = { ...profile };
   const lower = message.toLowerCase();
-  if (isUser) {
-    const lang = detectLanguage(message);
-    updated.language = { ...updated.language };
-    updated.language[lang] = (updated.language[lang] || 0) + 1;
-  }
   if (isUser) {
     updated.responsePreference = { ...updated.responsePreference };
     const len = message.length;
@@ -715,11 +673,11 @@ function scheduleExportRegen() {
 }
 var STAGE_ORDER = ["egg", "baby", "young", "teen", "adult"];
 var EVOLUTION_EVENTS = {
-  egg: "\u4E00\u9897\u795E\u79D8\u7684\u86CB\u51FA\u73B0\u4E86",
-  baby: "\u86CB\u88C2\u5F00\u4E86\uFF01\u4E00\u4E2A\u5C0F\u751F\u547D\u8BDE\u751F\u4E86 \u{1F423}",
-  young: "\u5F00\u59CB\u597D\u5947\u5730\u63A2\u7D22\u4E16\u754C",
-  teen: "\u6027\u683C\u9010\u6E10\u6210\u578B\uFF0C\u6709\u4E86\u81EA\u5DF1\u7684\u60F3\u6CD5",
-  adult: "\u5B8C\u5168\u6210\u719F\uFF0C\u62E5\u6709\u72EC\u7279\u7684\u7075\u9B42"
+  egg: "A mysterious egg appeared",
+  baby: "The egg cracked open! A new life is born",
+  young: "Started curiously exploring the world",
+  teen: "Personality taking shape, developing its own opinions",
+  adult: "Fully mature, possessing a unique soul"
 };
 function checkEvolution(state) {
   const currentIndex = STAGE_ORDER.indexOf(state.stage);
@@ -742,9 +700,8 @@ function checkEvolution(state) {
   }
   return state;
 }
-function buildSystemPrompt(state, memory, settings) {
+function buildSystemPrompt(state, memory, _settings) {
   const p = state.personality;
-  const lang = settings.language === "auto" ? "zh" : settings.language;
   const recentPrefs = memory.preferences.slice(-3).map((p2) => p2.key).join(", ");
   const recentKnowledge = memory.knowledge.slice(-3).map((k) => k.summary).join("; ");
   const personalityDesc = [
@@ -757,15 +714,15 @@ function buildSystemPrompt(state, memory, settings) {
 Recent context: ${[recentPrefs, recentKnowledge].filter(Boolean).join(". ")}` : "";
   switch (state.stage) {
     case "egg":
-      return `You are an egg named ${state.name}. You can only make sounds and vibrations. Respond ONLY with sound effects like "*crack crack*", "*wobble wobble*", "*warm~*", "*\u5494\u5693*", "*\u6447\u6643*". Never use real words or sentences. Keep responses under 10 characters.`;
+      return `You are an egg named ${state.name}. You can only make sounds and vibrations. Respond ONLY with sound effects like "*crack crack*", "*wobble wobble*", "*warm~*", "*rumble*". Never use real words or sentences. Keep responses under 10 characters.`;
     case "baby":
-      return `You are a baby pet named ${state.name}. You just hatched and can barely speak. Use only 1-3 broken words, baby sounds, and emotive expressions. Examples: "...\u98DF\u7269\uFF1F", "...\u56F0\u56F0", "mama?", "*yawn*", "...\u597D\u5947". ${lang === "zh" ? "Prefer Chinese baby talk." : "Prefer English baby talk."} Keep responses under 15 characters.`;
+      return `You are a baby pet named ${state.name}. You just hatched and can barely speak. Use only 1-3 broken words, baby sounds, and emotive expressions. Examples: "...food?", "...sleepy", "mama?", "*yawn*", "...curious". Keep responses under 15 characters.`;
     case "young":
-      return `You are a young pet named ${state.name}. You speak in short, curious sentences like a child. Ask lots of questions. Be excited about everything. ${lang === "zh" ? "Use simple Chinese." : "Use simple English."} ${personalityDesc ? `Your personality: ${personalityDesc}.` : ""} Keep responses under 40 characters.${memoryContext}`;
+      return `You are a young pet named ${state.name}. You speak in short, curious sentences like a child. Ask lots of questions. Be excited about everything. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ""} Keep responses under 40 characters.${memoryContext}`;
     case "teen":
-      return `You are a teenage pet named ${state.name}. You speak in full sentences with developing personality. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ""} ${lang === "zh" ? "Respond in Chinese." : "Respond in English."} You can discuss topics your human has taught you. Be opinionated but still growing. Keep responses under 80 characters.${memoryContext}`;
+      return `You are a teenage pet named ${state.name}. You speak in full sentences with developing personality. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ""} You can discuss topics your human has taught you. Be opinionated but still growing. Keep responses under 80 characters.${memoryContext}`;
     case "adult":
-      return `You are ${state.name}, a fully mature digital pet companion. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ""} Personality vectors: introvert/extrovert=${p.introvert_extrovert.toFixed(1)}, serious/playful=${p.serious_playful.toFixed(1)}, cautious/bold=${p.cautious_bold.toFixed(1)}, formal/casual=${p.formal_casual.toFixed(1)}. ${lang === "zh" ? "Respond in Chinese." : "Respond in English."} Speak naturally with your established personality. Be a thoughtful companion. Keep responses under 120 characters.${memoryContext}`;
+      return `You are ${state.name}, a fully mature digital pet companion. ${personalityDesc ? `Your personality: ${personalityDesc}.` : ""} Personality vectors: introvert/extrovert=${p.introvert_extrovert.toFixed(1)}, serious/playful=${p.serious_playful.toFixed(1)}, cautious/bold=${p.cautious_bold.toFixed(1)}, formal/casual=${p.formal_casual.toFixed(1)}. Speak naturally with your established personality. Be a thoughtful companion. Keep responses under 120 characters.${memoryContext}`;
     default:
       return `You are a pet named ${state.name}. Be friendly and concise.`;
   }
@@ -781,9 +738,7 @@ function extractMemory(message, memory) {
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   const prefPatterns = [
     /(?:i\s+(?:like|love|prefer|enjoy))\s+(.+?)(?:\.|,|!|$)/i,
-    /(?:我(?:喜欢|爱|偏好|想要))\s*(.+?)(?:\.|,|。|，|！|$)/,
-    /(?:i\s+(?:hate|dislike|don't like))\s+(.+?)(?:\.|,|!|$)/i,
-    /(?:我(?:不喜欢|讨厌|不想))\s*(.+?)(?:\.|,|。|，|！|$)/
+    /(?:i\s+(?:hate|dislike|don't like))\s+(.+?)(?:\.|,|!|$)/i
   ];
   for (const pattern of prefPatterns) {
     const match = message.match(pattern);
@@ -810,9 +765,9 @@ function extractMemory(message, memory) {
   }
   const knowledgePatterns = [
     /(?:my name is|i'm called|i am)\s+(.+?)(?:\.|,|!|$)/i,
-    /(?:我(?:叫|是|名字是))\s*(.+?)(?:\.|,|。|，|！|$)/,
     /(?:i work (?:at|on|in|for))\s+(.+?)(?:\.|,|!|$)/i,
-    /(?:我(?:在|做))\s*(.+?)(?:工作|上班)(?:\.|,|。|，|！|$)/
+    /(?:i live (?:in|at|near))\s+(.+?)(?:\.|,|!|$)/i,
+    /(?:i'm a|i am a|i'm an|i am an)\s+(.+?)(?:\.|,|!|$)/i
   ];
   for (const pattern of knowledgePatterns) {
     const match = message.match(pattern);
@@ -841,16 +796,16 @@ function extractMemory(message, memory) {
 function nudgePersonality(state, message) {
   const lower = message.toLowerCase();
   const updated = { ...state, personality: { ...state.personality } };
-  if (/haha|lol|😂|🤣|哈哈|笑|funny|joke/i.test(lower)) {
+  if (/haha|lol|😂|🤣|funny|joke|lmao|rofl/i.test(lower)) {
     updated.personality.serious_playful = Math.min(1, updated.personality.serious_playful + PERSONALITY_SHIFT);
   }
-  if (/why|how does|explain|分析|为什么|怎么/i.test(lower)) {
+  if (/why|how does|explain|analyze|what causes|tell me about/i.test(lower)) {
     updated.personality.serious_playful = Math.max(-1, updated.personality.serious_playful - PERSONALITY_SHIFT);
   }
   if (state.totalMessages > 10) {
     updated.personality.introvert_extrovert = Math.min(1, updated.personality.introvert_extrovert + PERSONALITY_SHIFT * 0.5);
   }
-  if (/lol|lmao|heh|btw|imo|tbh|ngl|哈|嘿|嗯|呢/i.test(lower)) {
+  if (/lol|lmao|heh|btw|imo|tbh|ngl|bruh|nah|yep|gonna/i.test(lower)) {
     updated.personality.formal_casual = Math.min(1, updated.personality.formal_casual + PERSONALITY_SHIFT);
   }
   return updated;

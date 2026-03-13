@@ -1,5 +1,5 @@
 import type { PetState, Settings, ExportData, MessageToBackground, LLMProvider } from '../shared/types'
-import { STAGE_NAMES } from '../shared/constants'
+import { STAGE_NAMES, PROVIDER_PRESETS } from '../shared/constants'
 
 // ── DOM refs ───────────────────────────────────────────
 
@@ -45,7 +45,7 @@ async function loadState() {
 
 function renderState(s: PetState) {
   $('pet-name').textContent = s.name
-  $('pet-stage').textContent = `${STAGE_NAMES[s.stage].en}`
+  $('pet-stage').textContent = STAGE_NAMES[s.stage] || s.stage
   const days = Math.max(1, Math.ceil((Date.now() - s.birthday) / 86400000))
   $('pet-days').textContent = `Day ${days}`
 
@@ -79,6 +79,20 @@ function setPersonality(id: string, value: number) {
   el.style.width = '10%'
 }
 
+// ── Provider preset auto-fill ──────────────────────────
+
+const providerSelect = $('input-provider') as HTMLSelectElement
+providerSelect.addEventListener('change', () => {
+  const key = providerSelect.value
+  const preset = PROVIDER_PRESETS[key]
+  if (preset) {
+    ;($('input-baseurl') as HTMLInputElement).value = preset.baseUrl
+    ;($('input-model') as HTMLInputElement).value = preset.model
+    ;($('input-baseurl') as HTMLInputElement).placeholder = preset.baseUrl || 'https://your-api-base-url'
+    ;($('input-model') as HTMLInputElement).placeholder = preset.model || 'model-name'
+  }
+})
+
 // ── Settings ───────────────────────────────────────────
 
 async function loadSettings() {
@@ -88,7 +102,6 @@ async function loadSettings() {
     const s = res.settings
 
     ;($('input-name') as HTMLInputElement).value = s.petName
-    ;($('input-language') as HTMLSelectElement).value = s.language
     ;($('input-provider') as HTMLSelectElement).value = s.provider
     ;($('input-baseurl') as HTMLInputElement).value = s.apiBaseUrl
     ;($('input-apikey') as HTMLInputElement).value = s.apiKey
@@ -104,8 +117,7 @@ async function loadSettings() {
 
 function readFormSettings(): Partial<Settings> {
   return {
-    petName: ($('input-name') as HTMLInputElement).value.trim() || 'Clawdy',
-    language: ($('input-language') as HTMLSelectElement).value as Settings['language'],
+    petName: ($('input-name') as HTMLInputElement).value.trim() || 'Clawfish',
     provider: ($('input-provider') as HTMLSelectElement).value as LLMProvider,
     apiBaseUrl: ($('input-baseurl') as HTMLInputElement).value.trim(),
     apiKey: ($('input-apikey') as HTMLInputElement).value.trim(),
@@ -169,7 +181,7 @@ $('btn-test-api').addEventListener('click', async () => {
         messages: [{ role: 'user', content: 'Hi' }],
       })
     } else {
-      // OpenAI-compatible (MiniMax, etc.)
+      // OpenAI-compatible (MiniMax, OpenAI, DeepSeek, Gemini, Groq, etc.)
       url = apiBaseUrl.endsWith('/chat/completions')
         ? apiBaseUrl
         : `${apiBaseUrl}/chat/completions`
@@ -178,7 +190,7 @@ $('btn-test-api').addEventListener('click', async () => {
         'Content-Type': 'application/json',
       }
       body = JSON.stringify({
-        model: model || 'MiniMax-M2.5-Lightning',
+        model: model || 'gpt-4o-mini',
         max_tokens: 10,
         messages: [
           { role: 'system', content: 'Reply with OK' },

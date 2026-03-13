@@ -13,11 +13,11 @@
   var PHYSICS_FPS = 30;
   var BUBBLE_DURATION = 5e3;
   var STAGE_NAMES = {
-    egg: { zh: "\u86CB", en: "Egg" },
-    baby: { zh: "\u5E7C\u5E74", en: "Baby" },
-    young: { zh: "\u5C11\u5E74", en: "Young" },
-    teen: { zh: "\u9752\u5E74", en: "Teen" },
-    adult: { zh: "\u6210\u5E74", en: "Adult" }
+    egg: "Egg",
+    baby: "Baby",
+    young: "Young",
+    teen: "Teen",
+    adult: "Adult"
   };
 
   // src/content/sprites.ts
@@ -1895,8 +1895,7 @@
       this.petName = name;
       this.petStage = stage;
       this.nameEl.textContent = name;
-      const stageLabel = STAGE_NAMES[stage];
-      this.stageEl.textContent = stageLabel ? stageLabel.en : stage;
+      this.stageEl.textContent = STAGE_NAMES[stage] || stage;
     }
     /** Load chat history from stored messages */
     loadHistory(messages) {
@@ -2147,16 +2146,6 @@
     }
   };
 
-  // src/shared/i18n.ts
-  var _lang = "en";
-  function setLang(lang) {
-    if (lang === "auto") {
-      _lang = typeof navigator !== "undefined" && navigator.language.startsWith("zh") ? "zh" : "en";
-    } else {
-      _lang = lang;
-    }
-  }
-
   // src/content/index.ts
   var ACTIVE_INSTANCE_KEY = "petclawActiveInstance";
   var SHUTDOWN_EVENT = "petclaw:shutdown";
@@ -2390,9 +2379,6 @@
         const response = await sendToBackground({ type: "INIT" });
         if (response.ok && response.state) {
           handleStateUpdate(response.state);
-        }
-        if (response.ok && response.settings) {
-          setLang(response.settings.language);
         }
         if (response.ok && response.chatHistory && response.chatHistory.length > 0) {
           chatUI.loadHistory(response.chatHistory);

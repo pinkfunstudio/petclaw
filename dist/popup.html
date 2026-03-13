@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,7 +10,7 @@
   <div id="app">
     <!-- Header -->
     <div class="header">
-      <div class="logo">🦞 PetClaw</div>
+      <div class="logo">&#129438; PetClaw</div>
       <div class="version">v0.1</div>
     </div>
 
@@ -24,9 +24,9 @@
     <!-- Status tab -->
     <div class="tab-content active" id="tab-status">
       <div class="pet-card">
-        <div class="pet-name" id="pet-name">小爪</div>
-        <div class="pet-stage" id="pet-stage">蛋</div>
-        <div class="pet-days" id="pet-days">第 1 天</div>
+        <div class="pet-name" id="pet-name">Clawfish</div>
+        <div class="pet-stage" id="pet-stage">Egg</div>
+        <div class="pet-days" id="pet-days">Day 1</div>
       </div>
 
       <div class="stats">
@@ -96,21 +96,19 @@
     <div class="tab-content" id="tab-settings">
       <div class="form-group">
         <label>Pet Name</label>
-        <input type="text" id="input-name" placeholder="Clawdy">
-      </div>
-      <div class="form-group">
-        <label>Language</label>
-        <select id="input-language">
-          <option value="en">English</option>
-          <option value="zh">中文</option>
-          <option value="auto">Auto</option>
-        </select>
+        <input type="text" id="input-name" placeholder="Clawfish">
       </div>
       <div class="form-group">
         <label>LLM Provider</label>
         <select id="input-provider">
           <option value="minimax">MiniMax</option>
           <option value="claude">Claude (Anthropic)</option>
+          <option value="openai">OpenAI</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="gemini">Gemini (Google)</option>
+          <option value="groq">Groq</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="ollama">Ollama (Local)</option>
           <option value="openai-compatible">OpenAI Compatible</option>
         </select>
       </div>
@@ -150,31 +148,31 @@
 
       <div class="export-files">
         <div class="export-file">
-          <div class="file-icon">📜</div>
+          <div class="file-icon">&#128220;</div>
           <div class="file-info">
             <div class="file-name">SOUL.md</div>
-            <div class="file-desc">Agent 人格 — 语气、风格、价值观</div>
+            <div class="file-desc">Agent personality — tone, style, values</div>
           </div>
         </div>
         <div class="export-file">
-          <div class="file-icon">🧠</div>
+          <div class="file-icon">&#129504;</div>
           <div class="file-info">
             <div class="file-name">MEMORY.md</div>
-            <div class="file-desc">共同记忆 — 对话沉淀、知识积累</div>
+            <div class="file-desc">Shared experiences — conversation history, knowledge</div>
           </div>
         </div>
         <div class="export-file">
-          <div class="file-icon">👤</div>
+          <div class="file-icon">&#128100;</div>
           <div class="file-info">
             <div class="file-name">USER.md</div>
-            <div class="file-desc">用户画像 — 习惯、偏好、兴趣</div>
+            <div class="file-desc">User profile — habits, preferences, interests</div>
           </div>
         </div>
         <div class="export-file">
-          <div class="file-icon">🪪</div>
+          <div class="file-icon">&#129706;</div>
           <div class="file-info">
             <div class="file-name">IDENTITY.md</div>
-            <div class="file-desc">身份档案 — OpenClaw 5-field identity card</div>
+            <div class="file-desc">Identity card — OpenClaw 5-field format</div>
           </div>
         </div>
       </div>

@@ -418,8 +418,7 @@ export class ChatUI {
     this.petName = name
     this.petStage = stage
     this.nameEl.textContent = name
-    const stageLabel = STAGE_NAMES[stage]
-    this.stageEl.textContent = stageLabel ? stageLabel.en : stage
+    this.stageEl.textContent = STAGE_NAMES[stage] || stage
   }
 
   /** Load chat history from stored messages */

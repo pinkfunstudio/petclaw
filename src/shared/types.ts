@@ -64,7 +64,6 @@ export interface UserProfile {
   totalSessions: number
   avgSessionLength: number       // minutes
 
-  language: Record<string, number>        // { "zh": 0.6, "en": 0.4 }
   toneStats: Record<string, number>       // { "concise": 12, "detailed": 3 }
   topicDistribution: Record<string, number>
 
@@ -134,7 +133,7 @@ export type BackgroundResponse =
 
 // ── Settings ───────────────────────────────────────────
 
-export type LLMProvider = 'minimax' | 'claude' | 'openai-compatible'
+export type LLMProvider = string
 
 export interface Settings {
   provider: LLMProvider
@@ -143,7 +142,6 @@ export interface Settings {
   model: string                  // e.g. 'MiniMax-M2.5-Lightning'
   petName: string
   enableBrowsingTracker: boolean
-  language: 'zh' | 'en' | 'auto'
   petVisible: boolean
 }
 
