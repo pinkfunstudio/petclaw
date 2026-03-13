@@ -295,6 +295,7 @@ export class ChatUI {
 
   // Context menu
   private contextMenuEl: HTMLDivElement
+  private _dismissHandler: (() => void) | null = null
 
   // Callbacks
   private _onSend: ((text: string) => void) | null = null
@@ -589,6 +590,13 @@ export class ChatUI {
 
   /** Show context menu at the given viewport coordinates */
   public showContextMenu(x: number, y: number): void {
+    // Clean up any stale dismiss listeners from a previous invocation
+    if (this._dismissHandler) {
+      window.removeEventListener('click', this._dismissHandler)
+      window.removeEventListener('contextmenu', this._dismissHandler)
+      this._dismissHandler = null
+    }
+
     this.contextMenuEl.style.left = `${x}px`
     this.contextMenuEl.style.top = `${y}px`
     this.contextMenuEl.classList.add('visible')
@@ -598,7 +606,9 @@ export class ChatUI {
       this.hideContextMenu()
       window.removeEventListener('click', dismiss)
       window.removeEventListener('contextmenu', dismiss)
+      this._dismissHandler = null
     }
+    this._dismissHandler = dismiss
     setTimeout(() => {
       window.addEventListener('click', dismiss)
       window.addEventListener('contextmenu', dismiss)

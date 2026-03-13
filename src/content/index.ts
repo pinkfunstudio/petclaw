@@ -22,6 +22,7 @@ import type {
 import { Pet } from './pet'
 import { ChatUI } from './chat'
 import { ElementScanner } from './elements'
+import { createZip } from '../shared/zip'
 
 const ACTIVE_INSTANCE_KEY = 'petclawActiveInstance'
 const SHUTDOWN_EVENT = 'petclaw:shutdown'
@@ -417,20 +418,18 @@ function initPetClaw() {
       void sendToBackground({ type: 'EXPORT' }).then(response => {
         if (response.ok && response.exportData) {
           const data = response.exportData
-          for (const [filename, content] of [
-            ['SOUL.md', data.soul],
-            ['MEMORY.md', data.memory],
-            ['USER.md', data.user],
-            ['IDENTITY.md', data.id],
-          ] as const) {
-            const blob = new Blob([content], { type: 'text/markdown' })
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = filename
-            a.click()
-            URL.revokeObjectURL(url)
-          }
+          const zip = createZip([
+            { name: 'SOUL.md', content: data.soul },
+            { name: 'MEMORY.md', content: data.memory },
+            { name: 'USER.md', content: data.user },
+            { name: 'IDENTITY.md', content: data.id },
+          ])
+          const url = URL.createObjectURL(zip)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = 'petclaw-export.zip'
+          a.click()
+          URL.revokeObjectURL(url)
         }
       })
     } else if (action === 'hide') {
