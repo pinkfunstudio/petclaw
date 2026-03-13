@@ -47,7 +47,7 @@ Click the PetClaw extension icon to open the popup. In the **Settings** tab:
 
 - Choose an LLM provider (MiniMax, Claude, OpenAI-compatible)
 - Enter your API key and model
-- Name your pet (default: Clawdy)
+- Name your pet (default: Clawfish)
 - Toggle browsing tracker and language
 
 ## Tech Stack
