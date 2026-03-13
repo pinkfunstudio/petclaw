@@ -295,6 +295,10 @@ function initPetClaw() {
             chatUI.showBubble('Good morning!')
           }
           break
+
+        case 'VISIBILITY_UPDATE':
+          container.style.display = message.visible ? '' : 'none'
+          break
       }
     } catch (err: any) {
       if (err?.message?.includes('Extension context invalidated')) {
@@ -313,6 +317,10 @@ function initPetClaw() {
       const response = await sendToBackground({ type: 'INIT' })
       if (response.ok && response.state) {
         handleStateUpdate(response.state)
+      }
+      // Check initial pet visibility
+      if (response.ok && (response as any).settings?.petVisible === false) {
+        container.style.display = 'none'
       }
       // Load chat history from storage
       if (response.ok && response.chatHistory && response.chatHistory.length > 0) {
@@ -389,6 +397,46 @@ function initPetClaw() {
     if (!isInstanceAlive()) return
     chatUI.showBubble('So dizzy...')
     void sendToBackground({ type: 'PET_INTERACTION', action: 'drop' })
+  })
+
+  // ── Pet right-click → context menu ──────────────
+
+  pet.onContextMenu((x: number, y: number) => {
+    if (!isInstanceAlive()) return
+    chatUI.showContextMenu(x, y)
+  })
+
+  chatUI.onContextMenuAction((action: string) => {
+    if (!isInstanceAlive()) return
+    if (action === 'settings') {
+      // Open extension popup (settings tab)
+      try {
+        chrome.runtime.sendMessage({ type: 'OPEN_POPUP' }).catch(() => {})
+      } catch { /* ignore */ }
+    } else if (action === 'export') {
+      void sendToBackground({ type: 'EXPORT' }).then(response => {
+        if (response.ok && response.exportData) {
+          const data = response.exportData
+          for (const [filename, content] of [
+            ['SOUL.md', data.soul],
+            ['MEMORY.md', data.memory],
+            ['USER.md', data.user],
+            ['IDENTITY.md', data.id],
+          ] as const) {
+            const blob = new Blob([content], { type: 'text/markdown' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = filename
+            a.click()
+            URL.revokeObjectURL(url)
+          }
+        }
+      })
+    } else if (action === 'hide') {
+      container.style.display = 'none'
+      void sendToBackground({ type: 'SAVE_SETTINGS', settings: { petVisible: false } })
+    }
   })
 
   // ── Chat send ─────────────────────────────────────────

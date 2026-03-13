@@ -32,7 +32,7 @@ import {
 } from '../shared/storage'
 import { chatWithLLM } from './llm'
 import { generateAll } from './profiler'
-import { trackActivity, trackMessage, trackFeedback } from './tracker'
+import { trackActivity, trackMessage, trackFeedback, trackDomain } from './tracker'
 import { analyzeDream } from './dreamer'
 
 // ── Alarm name ──────────────────────────────────────────
@@ -632,6 +632,19 @@ async function handleMessage(
         }
       }
 
+      // Broadcast visibility change to all tabs
+      if (msg.settings.petVisible !== undefined) {
+        try {
+          const tabs = await chrome.tabs.query({})
+          const visMsg: MessageToContent = { type: 'VISIBILITY_UPDATE', visible: merged.petVisible }
+          for (const tab of tabs) {
+            if (tab.id != null) {
+              chrome.tabs.sendMessage(tab.id, visMsg).catch(() => {})
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
       return { ok: true, settings: merged }
     }
 
@@ -830,4 +843,30 @@ setupDecayAlarm().then(() => {
   console.log('[PetClaw] Service worker started.')
 }).catch(err => {
   console.error('[PetClaw] Failed to setup decay alarm:', err)
+})
+
+// ── Browsing tracker (domain-level, opt-in) ─────────────
+
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  try {
+    const settings = await getSettings()
+    if (!settings.enableBrowsingTracker) return
+
+    const tab = await chrome.tabs.get(activeInfo.tabId)
+    if (!tab.url) return
+
+    let domain: string
+    try {
+      domain = new URL(tab.url).hostname
+    } catch {
+      return
+    }
+    if (!domain || domain === 'newtab' || domain.startsWith('chrome')) return
+
+    let profile = await getUserProfile()
+    profile = trackDomain(profile, domain)
+    await saveUserProfile(profile)
+  } catch {
+    // Non-critical
+  }
 })

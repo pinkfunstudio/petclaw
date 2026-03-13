@@ -4,7 +4,7 @@ export type PetStage = 'egg' | 'baby' | 'young' | 'teen' | 'adult'
 
 export type PetAction =
   | 'idle' | 'walk' | 'run' | 'sleep' | 'eat'
-  | 'talk' | 'happy' | 'sad' | 'fall' | 'climb'
+  | 'talk' | 'happy' | 'sad' | 'fall' | 'climb' | 'fly'
 
 export interface Personality {
   introvert_extrovert: number    // -1 (introvert) to 1 (extrovert)
@@ -159,6 +159,7 @@ export type MessageToContent =
   | { type: 'PET_SPEAK'; text: string }
   | { type: 'CHAT_UPDATE'; messages: ChatMessage[] }
   | { type: 'PET_SLEEP'; sleeping: boolean }
+  | { type: 'VISIBILITY_UPDATE'; visible: boolean }
 
 export type BackgroundResponse =
   | { ok: true; state?: PetState; settings?: Settings; exportData?: ExportData; chatHistory?: ChatMessage[] }
@@ -186,5 +187,5 @@ export interface ExportData {
   soul: string                   // SOUL.md content
   memory: string                 // MEMORY.md content
   user: string                   // USER.md content
-  id: string                     // ID.md content
+  id: string                     // IDENTITY.md content
 }

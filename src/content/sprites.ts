@@ -820,6 +820,7 @@ function resolveAction(action: PetAction): string {
     case 'run':    return 'walk'
     case 'talk':   return 'idle'
     case 'climb':  return 'walk'
+    case 'fly':    return 'happy'
     default:       return action
   }
 }

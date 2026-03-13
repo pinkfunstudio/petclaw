@@ -4,27 +4,27 @@
 
 You think you're raising a pet. You're actually training your AI agent.
 
-PetClaw is a Chrome Extension that puts a pixel-art lobster on every webpage. Feed it, chat with it, drag it around — while it silently learns your habits, preferences, and communication style. Over time it exports ready-to-use [OpenClaw](https://github.com/openclaw) configuration files (SOUL.md, MEMORY.md, USER.md, ID.md) so your AI agent already knows you.
+PetClaw is a Chrome Extension that puts a pixel-art lobster on every webpage. Feed it, chat with it, drag it around — while it silently learns your habits, preferences, and communication style. Over time it exports ready-to-use [OpenClaw](https://github.com/openclaw) configuration files (SOUL.md, MEMORY.md, USER.md, IDENTITY.md) so your AI agent already knows you.
 
 ## Features
 
 **Pet Lifecycle** — 5 growth stages from egg to adult, each with unique sprites and evolving personality vectors (introvert↔extrovert, serious↔playful, cautious↔bold, formal↔casual).
 
-**Pixel-Art Physics** — Canvas-rendered 64×64 sprites at 8 fps. Gravity, bouncing, drag-and-throw with velocity tracking. The lobster walks, runs, sleeps, eats, climbs, and reacts to your mouse.
+**Pixel-Art Physics** — Canvas-rendered 64×64 sprites at 8 fps. Gravity, bouncing, drag-and-throw with velocity tracking. The lobster walks, runs, sleeps, eats, climbs, flies (teen/adult), and reacts to your mouse.
+
+**Mouse Reactions** — Hover to make the pet look at you. Move fast to startle or attract it (depends on personality). Leave the mouse idle and it comes over to nuzzle your cursor. Right-click for a context menu (settings, export, hide).
 
 **LLM Chat** — Real-time streaming conversations via Claude, MiniMax, DeepSeek, or any OpenAI-compatible endpoint. The pet's personality adapts as it grows. Shadow DOM isolation keeps the UI clean.
 
-**Passive Learning** — Tracks your active hours, language preferences, topic interests (9 categories), feedback style, and response length patterns — all stored locally, never sent anywhere.
+**Passive Learning** — Tracks your active hours, topic interests (10 categories), browsing domains (opt-in), feedback style, and response length patterns — all stored locally, never sent anywhere.
 
-**OpenClaw Export** — Automatically generates 4 config files after each interaction:
-- `SOUL.md` — Core personality, boundaries, and vibe
+**OpenClaw Export** — Automatically generates 4 config files after each interaction, exported as a single ZIP:
+- `SOUL.md` — Core personality, boundaries, vibe, and closing
 - `MEMORY.md` — Shared experiences and learned preferences
 - `USER.md` — Activity patterns and topic distribution
-- `ID.md` — Pet identity card with growth milestones
+- `IDENTITY.md` — Pet identity card (OpenClaw 5-field format)
 
 **Cross-Tab Sync** — Only one pet runs at a time across all tabs. State, chat history, and position stay in sync.
-
-**i18n** — Chinese and English, auto-detected.
 
 ## Install
 
@@ -45,10 +45,10 @@ Then load as an unpacked extension in Chrome:
 
 Click the PetClaw extension icon to open the popup. In the **Settings** tab:
 
-- Choose an LLM provider (MiniMax, Claude, OpenAI-compatible)
+- Choose an LLM provider (MiniMax, Claude, OpenAI, DeepSeek, Gemini, Groq, OpenRouter, Ollama, or any OpenAI-compatible endpoint)
 - Enter your API key and model
 - Name your pet (default: Clawfish)
-- Toggle browsing tracker and language
+- Toggle browsing tracker and pet visibility
 
 ## Tech Stack
 
@@ -67,10 +67,10 @@ Click the PetClaw extension icon to open the popup. In the **Settings** tab:
 ```
 petclaw/
 ├── src/
-│   ├── background/       # Service Worker: state, LLM, decay, profiler
+│   ├── background/       # Service Worker: state, LLM, decay, profiler, tracker
 │   ├── content/          # Content Script: pet, chat, sprites, physics
 │   ├── popup/            # Extension popup: status, settings, export
-│   └── shared/           # Types, constants, storage, i18n
+│   └── shared/           # Types, constants, storage, zip
 ├── design/               # Game design doc & review reports
 ├── scripts/              # Build script (esbuild + icon gen)
 ├── dist/                 # Build output (load this in Chrome)

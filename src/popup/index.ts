@@ -1,5 +1,6 @@
 import type { PetState, Settings, ExportData, MessageToBackground, LLMProvider } from '../shared/types'
 import { STAGE_NAMES, PROVIDER_PRESETS } from '../shared/constants'
+import { createZip } from '../shared/zip'
 
 // ── DOM refs ───────────────────────────────────────────
 
@@ -246,10 +247,19 @@ $('btn-export').addEventListener('click', async () => {
   if (!res.ok || !res.exportData) return
 
   const data = res.exportData
-  downloadFile('SOUL.md', data.soul)
-  downloadFile('MEMORY.md', data.memory)
-  downloadFile('USER.md', data.user)
-  downloadFile('IDENTITY.md', data.id)
+  const zip = createZip([
+    { name: 'SOUL.md', content: data.soul },
+    { name: 'MEMORY.md', content: data.memory },
+    { name: 'USER.md', content: data.user },
+    { name: 'IDENTITY.md', content: data.id },
+  ])
+
+  const url = URL.createObjectURL(zip)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'petclaw-export.zip'
+  a.click()
+  URL.revokeObjectURL(url)
 })
 
 // ── Preview tabs ──────────────────────────────────────────

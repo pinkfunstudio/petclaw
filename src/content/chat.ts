@@ -225,6 +225,40 @@ const SHADOW_STYLES = `
     text-decoration: none;
   }
   .petclaw-footer a:hover { color: #999; }
+
+  .petclaw-context-menu {
+    position: fixed;
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    overflow: hidden;
+    z-index: 30;
+    pointer-events: auto;
+    min-width: 140px;
+    display: none;
+  }
+  .petclaw-context-menu.visible {
+    display: block;
+  }
+  .petclaw-context-menu button {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    color: #e0e0e0;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px;
+    padding: 8px 16px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .petclaw-context-menu button:hover {
+    background: #2a2a4a;
+  }
+  .petclaw-context-menu button + button {
+    border-top: 1px solid #2a2a4a;
+  }
 `
 
 // ── ChatUI class ────────────────────────────────────────
@@ -259,10 +293,14 @@ export class ChatUI {
   private panelDragOffsetX = 0
   private panelDragOffsetY = 0
 
+  // Context menu
+  private contextMenuEl: HTMLDivElement
+
   // Callbacks
   private _onSend: ((text: string) => void) | null = null
   private _onFeed: (() => void) | null = null
   private _onStatus: (() => void) | null = null
+  private _onContextMenuAction: ((action: string) => void) | null = null
 
   constructor(shadowRoot: ShadowRoot, pet: Pet) {
     this.shadowRoot = shadowRoot
@@ -301,6 +339,27 @@ export class ChatUI {
       </div>
     `
     shadowRoot.appendChild(this.panelEl)
+
+    // Create context menu
+    this.contextMenuEl = document.createElement('div')
+    this.contextMenuEl.className = 'petclaw-context-menu'
+    this.contextMenuEl.innerHTML = `
+      <button data-action="settings">Settings</button>
+      <button data-action="export">Export Files</button>
+      <button data-action="hide">Hide Pet</button>
+    `
+    shadowRoot.appendChild(this.contextMenuEl)
+
+    // Context menu item handlers
+    this.contextMenuEl.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = (btn as HTMLElement).dataset.action
+        this.hideContextMenu()
+        if (action === 'settings') this._onContextMenuAction?.('settings')
+        else if (action === 'export') this._onContextMenuAction?.('export')
+        else if (action === 'hide') this._onContextMenuAction?.('hide')
+      })
+    })
 
     // Cache elements
     this.headerEl = this.panelEl.querySelector('.petclaw-panel-header')!
@@ -521,6 +580,34 @@ export class ChatUI {
   /** Register callback for status button */
   onStatus(callback: () => void): void {
     this._onStatus = callback
+  }
+
+  /** Register callback for context menu actions */
+  onContextMenuAction(cb: (action: string) => void): void {
+    this._onContextMenuAction = cb
+  }
+
+  /** Show context menu at the given viewport coordinates */
+  public showContextMenu(x: number, y: number): void {
+    this.contextMenuEl.style.left = `${x}px`
+    this.contextMenuEl.style.top = `${y}px`
+    this.contextMenuEl.classList.add('visible')
+
+    // Dismiss on next click anywhere
+    const dismiss = () => {
+      this.hideContextMenu()
+      window.removeEventListener('click', dismiss)
+      window.removeEventListener('contextmenu', dismiss)
+    }
+    setTimeout(() => {
+      window.addEventListener('click', dismiss)
+      window.addEventListener('contextmenu', dismiss)
+    }, 0)
+  }
+
+  /** Hide context menu */
+  public hideContextMenu(): void {
+    this.contextMenuEl.classList.remove('visible')
   }
 
   /** Clean up timers and DOM references */

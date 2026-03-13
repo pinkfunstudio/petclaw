@@ -1,4 +1,4 @@
-// claude-code/petclaw/src/shared/constants.ts
+// src/shared/constants.ts
 var STAGE_THRESHOLDS = {
   egg: 0,
   baby: 10,
@@ -43,7 +43,7 @@ var DEFAULT_SETTINGS = {
   enableDreamAnalysis: true
 };
 
-// claude-code/petclaw/src/shared/storage.ts
+// src/shared/storage.ts
 var KEYS = {
   PET_STATE: "petclaw_pet_state",
   USER_PROFILE: "petclaw_user_profile",
@@ -167,7 +167,7 @@ async function saveDeepProfile(profile) {
   await set(KEYS.DEEP_PROFILE, profile);
 }
 
-// claude-code/petclaw/src/background/llm.ts
+// src/background/llm.ts
 async function chatWithLLM(messages, systemPrompt, apiKey, model, onChunk, provider = "minimax", apiBaseUrl = "https://api.minimax.io/v1", maxTokens = 300) {
   if (provider === "claude") {
     return chatClaude(messages, systemPrompt, apiKey, model, onChunk, maxTokens);
@@ -328,7 +328,7 @@ function stripThinkTags(text) {
   return stripped.replace(/<think>[\s\S]*$/, "").trim();
 }
 
-// claude-code/petclaw/src/background/profiler.ts
+// src/background/profiler.ts
 function daysOld(birthday) {
   return Math.max(1, Math.floor((Date.now() - birthday) / (1e3 * 60 * 60 * 24)));
 }
@@ -474,6 +474,10 @@ ${knownPrefs ? "\nThings I know matter to my human:\n" + knownPrefs : ""}
 Each session, you wake up fresh. These files _are_ your memory.
 Personality was shaped by genuine conversation, not configuration \u2014 every trait reflects how the human interacts.
 This file is yours to evolve.
+
+## Closing
+
+You are not a fixed persona \u2014 you are a living document. Revisit these truths often. If they stop feeling right, change them. Growth means updating the soul, not just the skills.
 `;
 }
 function generateMemory(state, memory) {
@@ -605,7 +609,7 @@ function generateAll(state, profile, memory, deepProfile) {
   };
 }
 
-// claude-code/petclaw/src/background/tracker.ts
+// src/background/tracker.ts
 var TOPIC_KEYWORDS = {
   crypto: ["crypto", "blockchain", "bitcoin", "btc", "eth", "ethereum", "token", "defi", "nft", "web3", "wallet", "mining", "solana", "sol", "memecoin", "airdrop"],
   dev: ["code", "coding", "programming", "typescript", "javascript", "python", "rust", "react", "api", "git", "github", "bug", "debug", "deploy", "docker", "database", "frontend", "backend", "server", "npm"],
@@ -703,6 +707,14 @@ function trackMessage(profile, message, isUser) {
   }
   return updated;
 }
+function trackDomain(profile, domain) {
+  const updated = { ...profile };
+  if (!updated.topicDistribution) updated.topicDistribution = {};
+  const key = `domain:${domain}`;
+  updated.topicDistribution = { ...updated.topicDistribution };
+  updated.topicDistribution[key] = (updated.topicDistribution[key] || 0) + 1;
+  return updated;
+}
 function trackFeedback(profile, message) {
   const updated = { ...profile };
   updated.feedbackStyle = { ...updated.feedbackStyle };
@@ -731,7 +743,7 @@ function trackFeedback(profile, message) {
   return updated;
 }
 
-// claude-code/petclaw/src/background/dreamer.ts
+// src/background/dreamer.ts
 function buildDreamPrompt(profile) {
   const peakHours = profile.activeHours.map((c, h) => ({ h, c })).sort((a, b) => b.c - a.c).filter((x) => x.c > 0).slice(0, 3).map((x) => `${x.h}:00`).join(", ");
   const topTopics = Object.entries(profile.topicDistribution).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t]) => t).join(", ");
@@ -864,7 +876,7 @@ async function analyzeDream(chatHistory, profile, settings) {
   }
 }
 
-// claude-code/petclaw/src/background/index.ts
+// src/background/index.ts
 var DECAY_ALARM = "petclaw-decay";
 var regenTimer = null;
 function scheduleExportRegen() {
@@ -1317,6 +1329,19 @@ async function handleMessage(msg, sender) {
           await savePetState(updated);
         }
       }
+      if (msg.settings.petVisible !== void 0) {
+        try {
+          const tabs = await chrome.tabs.query({});
+          const visMsg = { type: "VISIBILITY_UPDATE", visible: merged.petVisible };
+          for (const tab of tabs) {
+            if (tab.id != null) {
+              chrome.tabs.sendMessage(tab.id, visMsg).catch(() => {
+              });
+            }
+          }
+        } catch {
+        }
+      }
       return { ok: true, settings: merged };
     }
     // ── GET_SETTINGS ──────────────────────────────────
@@ -1455,5 +1480,24 @@ setupDecayAlarm().then(() => {
   console.log("[PetClaw] Service worker started.");
 }).catch((err) => {
   console.error("[PetClaw] Failed to setup decay alarm:", err);
+});
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  try {
+    const settings = await getSettings();
+    if (!settings.enableBrowsingTracker) return;
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    if (!tab.url) return;
+    let domain;
+    try {
+      domain = new URL(tab.url).hostname;
+    } catch {
+      return;
+    }
+    if (!domain || domain === "newtab" || domain.startsWith("chrome")) return;
+    let profile = await getUserProfile();
+    profile = trackDomain(profile, domain);
+    await saveUserProfile(profile);
+  } catch {
+  }
 });
 //# sourceMappingURL=background.js.map

@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // claude-code/petclaw/src/shared/constants.ts
+  // src/shared/constants.ts
   var DECAY_INTERVAL = 5 * 60 * 1e3;
   var PROACTIVE_SPEAK_INTERVAL = 30 * 60 * 1e3;
   var IDLE_THRESHOLD = 2 * 60 * 60 * 1e3;
@@ -21,7 +21,7 @@
   };
   var DEFAULT_SLEEP_TIMEOUT = 30 * 60 * 1e3;
 
-  // claude-code/petclaw/src/content/sprites.ts
+  // src/content/sprites.ts
   var EGG_PALETTE = {
     0: "transparent",
     1: "#e85d4a",
@@ -818,6 +818,8 @@
         return "idle";
       case "climb":
         return "walk";
+      case "fly":
+        return "happy";
       default:
         return action;
     }
@@ -834,7 +836,7 @@
     };
   }
 
-  // claude-code/petclaw/src/content/pet.ts
+  // src/content/pet.ts
   function clamp(v, min, max) {
     return Math.max(min, Math.min(max, v));
   }
@@ -900,6 +902,18 @@
     pokeResetTimer = null;
     // Bounce state
     bouncing = false;
+    // Mouse reaction tracking
+    mouseX = 0;
+    mouseY = 0;
+    lastMouseMoveTime = 0;
+    mouseReactionCooldown = 0;
+    approachingMouse = false;
+    personality = {
+      introvert_extrovert: 0,
+      serious_playful: 0,
+      cautious_bold: 0,
+      formal_casual: 0
+    };
     // Cross-tab sync: only the active (visible) tab runs physics
     physicsEnabled = true;
     // Platform / climbing
@@ -909,6 +923,10 @@
     targetPlatform = null;
     climbSide = "right";
     platformRefreshCounter = 0;
+    // Flying
+    flying = false;
+    flyTargetX = 0;
+    flyTargetY = 0;
     // Timers
     animInterval = null;
     physicsInterval = null;
@@ -918,6 +936,7 @@
     _onPoke = null;
     _onDragStart = null;
     _onDrop = null;
+    _onContextMenu = null;
     constructor(container) {
       this.container = container;
       this.canvas = document.createElement("canvas");
@@ -940,7 +959,10 @@
       this.physicsInterval = window.setInterval(() => this.physicsTick(), 1e3 / PHYSICS_FPS);
       this.stateTimer = randInt(60, 180);
       this.canvas.addEventListener("mousedown", this.handleMouseDown);
+      this.canvas.addEventListener("mouseover", this.handleCanvasMouseOver);
       this.canvas.addEventListener("touchstart", this.handleTouchStart, { passive: false });
+      this.canvas.addEventListener("contextmenu", this.handleContextMenu);
+      window.addEventListener("mousemove", this.handleWindowMouseMove);
       window.addEventListener("resize", this.handleResize);
       this.render();
       this.updateCanvasPosition();
@@ -949,6 +971,7 @@
     /** Sync visual state with authoritative background state */
     updateState(state) {
       this.stage = state.stage;
+      this.personality = state.personality;
       if (!this.dragging) {
         if (!this.physicsEnabled) {
           this.x = clamp(state.x, 0, window.innerWidth - PET_SIZE);
@@ -1022,6 +1045,10 @@
     onDrop(cb) {
       this._onDrop = cb;
     }
+    /** Register context menu handler */
+    onContextMenu(cb) {
+      this._onContextMenu = cb;
+    }
     // ── Drag handling ─────────────────────────────────────
     startDrag(clientX, clientY) {
       this.dragging = true;
@@ -1036,6 +1063,7 @@
       this.velocityY = 0;
       this.velocityX = 0;
       this.bouncing = false;
+      this.flying = false;
       this.surfaceMode = "ground";
       this.activePlatform = null;
       this.targetPlatform = null;
@@ -1084,8 +1112,11 @@
       if (this.clickTimer !== null) clearTimeout(this.clickTimer);
       if (this.pokeResetTimer !== null) clearTimeout(this.pokeResetTimer);
       this.canvas.removeEventListener("mousedown", this.handleMouseDown);
+      this.canvas.removeEventListener("mouseover", this.handleCanvasMouseOver);
       this.canvas.removeEventListener("touchstart", this.handleTouchStart);
+      this.canvas.removeEventListener("contextmenu", this.handleContextMenu);
       window.removeEventListener("mousemove", this.handleMouseMove);
+      window.removeEventListener("mousemove", this.handleWindowMouseMove);
       window.removeEventListener("mouseup", this.handleMouseUp);
       window.removeEventListener("touchmove", this.handleTouchMove);
       window.removeEventListener("touchend", this.handleTouchEnd);
@@ -1155,6 +1186,25 @@
       this.handleClickDetection(this.lastDragX, this.lastDragY);
       this.endDrag(this.lastDragX, this.lastDragY);
     };
+    handleWindowMouseMove = (e) => {
+      this.mouseX = e.clientX;
+      this.mouseY = e.clientY;
+      this.lastMouseMoveTime = Date.now();
+    };
+    handleCanvasMouseOver = (e) => {
+      if (this.dragging || this.behaviorLocked) return;
+      if (this.action === "fall" || this.bouncing || this.surfaceMode === "climbing") return;
+      const petCenterX = this.x + PET_SIZE / 2;
+      this.direction = e.clientX > petCenterX ? 1 : -1;
+      this.action = "idle";
+      this.animFrame = 0;
+      this.stateTimer = 30;
+    };
+    handleContextMenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._onContextMenu?.(e.clientX, e.clientY);
+    };
     handleResize = () => {
       this.groundY = window.innerHeight - GROUND_Y_OFFSET - PET_SIZE;
       this.x = clamp(this.x, 0, window.innerWidth - PET_SIZE);
@@ -1204,6 +1254,12 @@
         return;
       }
       this.updateSquash();
+      if (this.mouseReactionCooldown > 0) {
+        this.mouseReactionCooldown--;
+      }
+      if (this.mouseReactionCooldown <= 0 && !this.behaviorLocked && this.lastMouseMoveTime > 0) {
+        this.checkFastMouseReaction();
+      }
       this.platformRefreshCounter++;
       if (this.platformRefreshCounter >= PLATFORM_REFRESH_TICKS) {
         this.platformRefreshCounter = 0;
@@ -1219,6 +1275,27 @@
           this.animFrame = 0;
           this.stateTimer = randInt(30, 90);
           this.behaviorLocked = false;
+        }
+        this.updateCanvasPosition();
+        return;
+      }
+      if (this.flying) {
+        const dx = this.flyTargetX - this.x;
+        const dy = this.flyTargetY - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 10 || this.stateTimer <= 0) {
+          this.flying = false;
+          this.action = "fall";
+          this.velocityY = 0;
+          this.velocityX = this.direction * WALK_SPEED * 0.3;
+          this.behaviorLocked = true;
+          this.animFrame = 0;
+        } else {
+          const speed = RUN_SPEED * 0.8;
+          this.x += dx / dist * speed;
+          this.y += dy / dist * speed;
+          this.direction = dx > 0 ? 1 : -1;
+          this.stateTimer--;
         }
         this.updateCanvasPosition();
         return;
@@ -1319,10 +1396,75 @@
       if (this.action === "walk" && this.targetPlatform) {
         this.checkArrivalAtPlatform();
       }
+      if (this.approachingMouse && this.action === "walk") {
+        const petCenterX = this.x + PET_SIZE / 2;
+        const distToMouse = Math.abs(petCenterX - this.mouseX);
+        if (distToMouse < 30) {
+          this.action = "happy";
+          this.animFrame = 0;
+          this.stateTimer = 60;
+          this.approachingMouse = false;
+          this.mouseReactionCooldown = 90;
+        }
+      }
+      if (this.surfaceMode === "ground" && this.action === "idle" && !this.behaviorLocked && !this.approachingMouse && this.mouseReactionCooldown <= 0 && this.lastMouseMoveTime > 0 && Date.now() - this.lastMouseMoveTime > 1e4) {
+        const petCenterX = this.x + PET_SIZE / 2;
+        const distToMouse = Math.abs(petCenterX - this.mouseX);
+        const mouseInViewport = this.mouseX > 0 && this.mouseX < window.innerWidth && this.mouseY > 0 && this.mouseY < window.innerHeight;
+        if (distToMouse > 100 && mouseInViewport) {
+          this.direction = this.mouseX > petCenterX ? 1 : -1;
+          this.action = "walk";
+          this.animFrame = 0;
+          this.stateTimer = Math.ceil(distToMouse / WALK_SPEED) + 30;
+          this.approachingMouse = true;
+        }
+      }
       if (this.y > this.groundY) {
         this.y = this.groundY;
       }
       this.updateCanvasPosition();
+    }
+    // ── Mouse reaction helpers ──────────────────────────────
+    lastFastCheckMouseX = 0;
+    lastFastCheckMouseY = 0;
+    lastFastCheckTime = 0;
+    /** Check if mouse moved fast near the pet and trigger personality-based reaction */
+    checkFastMouseReaction() {
+      const now = Date.now();
+      const dt = (now - this.lastFastCheckTime) / 1e3;
+      if (this.lastFastCheckTime === 0 || dt <= 0 || dt > 0.5) {
+        this.lastFastCheckMouseX = this.mouseX;
+        this.lastFastCheckMouseY = this.mouseY;
+        this.lastFastCheckTime = now;
+        return;
+      }
+      this.lastFastCheckTime = now;
+      const dx = this.mouseX - this.lastFastCheckMouseX;
+      const dy = this.mouseY - this.lastFastCheckMouseY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const velocity = dist / dt;
+      this.lastFastCheckMouseX = this.mouseX;
+      this.lastFastCheckMouseY = this.mouseY;
+      if (velocity <= 500) return;
+      const petCenterX = this.x + PET_SIZE / 2;
+      const petCenterY = this.y + PET_SIZE / 2;
+      const distToPetX = this.mouseX - petCenterX;
+      const distToPetY = this.mouseY - petCenterY;
+      const distToPet = Math.sqrt(distToPetX * distToPetX + distToPetY * distToPetY);
+      if (distToPet > 200) return;
+      if (this.action === "fall" || this.bouncing || this.surfaceMode === "climbing") return;
+      if (this.personality.cautious_bold < 0) {
+        this.action = "sad";
+        this.animFrame = 0;
+        this.stateTimer = 45;
+        this.behaviorLocked = true;
+      } else if (this.personality.cautious_bold > 0) {
+        this.direction = this.mouseX > petCenterX ? 1 : -1;
+        this.action = "walk";
+        this.animFrame = 0;
+        this.stateTimer = 60;
+      }
+      this.mouseReactionCooldown = 90;
     }
     // ── Behavior state machine ────────────────────────────
     transitionToNextBehavior() {
@@ -1375,6 +1517,19 @@
           this.animFrame = 0;
           return;
         }
+      }
+      if (this.surfaceMode === "ground" && (this.stage === "teen" || this.stage === "adult") && Math.random() < 0.08) {
+        this.flyTargetX = Math.random() * (window.innerWidth - PET_SIZE);
+        this.flyTargetY = window.innerHeight * (0.2 + Math.random() * 0.4);
+        const dx = this.flyTargetX - this.x;
+        const dy = this.flyTargetY - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        this.action = "fly";
+        this.flying = true;
+        this.behaviorLocked = true;
+        this.stateTimer = Math.max(120, Math.min(240, Math.ceil(dist / (RUN_SPEED * 0.8))));
+        this.animFrame = 0;
+        return;
       }
       if (isLateNight && r < 0.4) {
         this.action = "sleep";
@@ -1528,7 +1683,7 @@
     }
   };
 
-  // claude-code/petclaw/src/content/chat.ts
+  // src/content/chat.ts
   var SHADOW_STYLES = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1743,6 +1898,40 @@
     text-decoration: none;
   }
   .petclaw-footer a:hover { color: #999; }
+
+  .petclaw-context-menu {
+    position: fixed;
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    overflow: hidden;
+    z-index: 30;
+    pointer-events: auto;
+    min-width: 140px;
+    display: none;
+  }
+  .petclaw-context-menu.visible {
+    display: block;
+  }
+  .petclaw-context-menu button {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    color: #e0e0e0;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px;
+    padding: 8px 16px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .petclaw-context-menu button:hover {
+    background: #2a2a4a;
+  }
+  .petclaw-context-menu button + button {
+    border-top: 1px solid #2a2a4a;
+  }
 `;
   var ChatUI = class {
     shadowRoot;
@@ -1768,10 +1957,13 @@
     panelDragging = false;
     panelDragOffsetX = 0;
     panelDragOffsetY = 0;
+    // Context menu
+    contextMenuEl;
     // Callbacks
     _onSend = null;
     _onFeed = null;
     _onStatus = null;
+    _onContextMenuAction = null;
     constructor(shadowRoot, pet) {
       this.shadowRoot = shadowRoot;
       this.pet = pet;
@@ -1803,6 +1995,23 @@
       </div>
     `;
       shadowRoot.appendChild(this.panelEl);
+      this.contextMenuEl = document.createElement("div");
+      this.contextMenuEl.className = "petclaw-context-menu";
+      this.contextMenuEl.innerHTML = `
+      <button data-action="settings">Settings</button>
+      <button data-action="export">Export Files</button>
+      <button data-action="hide">Hide Pet</button>
+    `;
+      shadowRoot.appendChild(this.contextMenuEl);
+      this.contextMenuEl.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const action = btn.dataset.action;
+          this.hideContextMenu();
+          if (action === "settings") this._onContextMenuAction?.("settings");
+          else if (action === "export") this._onContextMenuAction?.("export");
+          else if (action === "hide") this._onContextMenuAction?.("hide");
+        });
+      });
       this.headerEl = this.panelEl.querySelector(".petclaw-panel-header");
       this.nameEl = this.panelEl.querySelector(".pet-name");
       this.stageEl = this.panelEl.querySelector(".pet-stage");
@@ -1985,6 +2194,29 @@
     onStatus(callback) {
       this._onStatus = callback;
     }
+    /** Register callback for context menu actions */
+    onContextMenuAction(cb) {
+      this._onContextMenuAction = cb;
+    }
+    /** Show context menu at the given viewport coordinates */
+    showContextMenu(x, y) {
+      this.contextMenuEl.style.left = `${x}px`;
+      this.contextMenuEl.style.top = `${y}px`;
+      this.contextMenuEl.classList.add("visible");
+      const dismiss = () => {
+        this.hideContextMenu();
+        window.removeEventListener("click", dismiss);
+        window.removeEventListener("contextmenu", dismiss);
+      };
+      setTimeout(() => {
+        window.addEventListener("click", dismiss);
+        window.addEventListener("contextmenu", dismiss);
+      }, 0);
+    }
+    /** Hide context menu */
+    hideContextMenu() {
+      this.contextMenuEl.classList.remove("visible");
+    }
     /** Clean up timers and DOM references */
     destroy() {
       if (this.bubbleTimer !== null) {
@@ -2015,7 +2247,7 @@
     }
   };
 
-  // claude-code/petclaw/src/content/elements.ts
+  // src/content/elements.ts
   var MIN_PLATFORM_WIDTH = PET_SIZE;
   var MIN_PLATFORM_HEIGHT = 16;
   var MAX_PLATFORMS = 15;
@@ -2147,7 +2379,7 @@
     }
   };
 
-  // claude-code/petclaw/src/content/index.ts
+  // src/content/index.ts
   var ACTIVE_INSTANCE_KEY = "petclawActiveInstance";
   var SHUTDOWN_EVENT = "petclaw:shutdown";
   window.addEventListener("unhandledrejection", (e) => {
@@ -2374,6 +2606,9 @@
               chatUI.showBubble("Good morning!");
             }
             break;
+          case "VISIBILITY_UPDATE":
+            container.style.display = message.visible ? "" : "none";
+            break;
         }
       } catch (err) {
         if (err?.message?.includes("Extension context invalidated")) {
@@ -2389,6 +2624,9 @@
         const response = await sendToBackground({ type: "INIT" });
         if (response.ok && response.state) {
           handleStateUpdate(response.state);
+        }
+        if (response.ok && response.settings?.petVisible === false) {
+          container.style.display = "none";
         }
         if (response.ok && response.chatHistory && response.chatHistory.length > 0) {
           chatUI.loadHistory(response.chatHistory);
@@ -2445,6 +2683,43 @@
       if (!isInstanceAlive()) return;
       chatUI.showBubble("So dizzy...");
       void sendToBackground({ type: "PET_INTERACTION", action: "drop" });
+    });
+    pet.onContextMenu((x, y) => {
+      if (!isInstanceAlive()) return;
+      chatUI.showContextMenu(x, y);
+    });
+    chatUI.onContextMenuAction((action) => {
+      if (!isInstanceAlive()) return;
+      if (action === "settings") {
+        try {
+          chrome.runtime.sendMessage({ type: "OPEN_POPUP" }).catch(() => {
+          });
+        } catch {
+        }
+      } else if (action === "export") {
+        void sendToBackground({ type: "EXPORT" }).then((response) => {
+          if (response.ok && response.exportData) {
+            const data = response.exportData;
+            for (const [filename, content] of [
+              ["SOUL.md", data.soul],
+              ["MEMORY.md", data.memory],
+              ["USER.md", data.user],
+              ["IDENTITY.md", data.id]
+            ]) {
+              const blob = new Blob([content], { type: "text/markdown" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = filename;
+              a.click();
+              URL.revokeObjectURL(url);
+            }
+          }
+        });
+      } else if (action === "hide") {
+        container.style.display = "none";
+        void sendToBackground({ type: "SAVE_SETTINGS", settings: { petVisible: false } });
+      }
     });
     chatUI.onSend(async (text) => {
       if (!isInstanceAlive()) return;

@@ -92,6 +92,19 @@ export function trackMessage(profile: UserProfile, message: string, isUser: bool
   return updated
 }
 
+// ── Track Domain (browsing tracker) ─────────────────
+
+/** Track the domain of the current page (called from background on tab changes) */
+export function trackDomain(profile: UserProfile, domain: string): UserProfile {
+  const updated = { ...profile }
+  if (!updated.topicDistribution) updated.topicDistribution = {}
+  // Store domain visits under a special 'domains' key prefix
+  const key = `domain:${domain}`
+  updated.topicDistribution = { ...updated.topicDistribution }
+  updated.topicDistribution[key] = (updated.topicDistribution[key] || 0) + 1
+  return updated
+}
+
 // ── Track Feedback ──────────────────────────────────────
 
 export function trackFeedback(profile: UserProfile, message: string): UserProfile {

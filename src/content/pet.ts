@@ -7,7 +7,7 @@
  * autonomous behavior transitions.
  */
 
-import type { PetState, PetAction, PetStage } from '../shared/types'
+import type { PetState, PetAction, PetStage, Personality } from '../shared/types'
 import type { PagePlatform } from './elements'
 import {
   PET_SIZE,
@@ -92,6 +92,19 @@ export class Pet {
   // Bounce state
   private bouncing = false
 
+  // Mouse reaction tracking
+  private mouseX = 0
+  private mouseY = 0
+  private lastMouseMoveTime = 0
+  private mouseReactionCooldown = 0
+  private approachingMouse = false
+  private personality: Personality = {
+    introvert_extrovert: 0,
+    serious_playful: 0,
+    cautious_bold: 0,
+    formal_casual: 0,
+  }
+
   // Cross-tab sync: only the active (visible) tab runs physics
   private physicsEnabled = true
 
@@ -103,6 +116,11 @@ export class Pet {
   private climbSide: 'left' | 'right' = 'right'
   private platformRefreshCounter = 0
 
+  // Flying
+  private flying = false
+  private flyTargetX = 0
+  private flyTargetY = 0
+
   // Timers
   private animInterval: number | null = null
   private physicsInterval: number | null = null
@@ -113,6 +131,7 @@ export class Pet {
   private _onPoke: ((count: number) => void) | null = null
   private _onDragStart: (() => void) | null = null
   private _onDrop: (() => void) | null = null
+  private _onContextMenu: ((x: number, y: number) => void) | null = null
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -146,7 +165,10 @@ export class Pet {
 
     // Bind events
     this.canvas.addEventListener('mousedown', this.handleMouseDown)
+    this.canvas.addEventListener('mouseover', this.handleCanvasMouseOver)
     this.canvas.addEventListener('touchstart', this.handleTouchStart, { passive: false })
+    this.canvas.addEventListener('contextmenu', this.handleContextMenu)
+    window.addEventListener('mousemove', this.handleWindowMouseMove)
     window.addEventListener('resize', this.handleResize)
 
     // Initial render
@@ -159,6 +181,7 @@ export class Pet {
   /** Sync visual state with authoritative background state */
   updateState(state: PetState): void {
     this.stage = state.stage
+    this.personality = state.personality
 
     if (!this.dragging) {
       if (!this.physicsEnabled) {
@@ -252,6 +275,11 @@ export class Pet {
     this._onDrop = cb
   }
 
+  /** Register context menu handler */
+  onContextMenu(cb: (x: number, y: number) => void): void {
+    this._onContextMenu = cb
+  }
+
   // ── Drag handling ─────────────────────────────────────
 
   private startDrag(clientX: number, clientY: number): void {
@@ -267,6 +295,7 @@ export class Pet {
     this.velocityY = 0
     this.velocityX = 0
     this.bouncing = false
+    this.flying = false
 
     // Leave platform/climbing state when grabbed
     this.surfaceMode = 'ground'
@@ -333,8 +362,11 @@ export class Pet {
     if (this.clickTimer !== null) clearTimeout(this.clickTimer)
     if (this.pokeResetTimer !== null) clearTimeout(this.pokeResetTimer)
     this.canvas.removeEventListener('mousedown', this.handleMouseDown)
+    this.canvas.removeEventListener('mouseover', this.handleCanvasMouseOver)
     this.canvas.removeEventListener('touchstart', this.handleTouchStart)
+    this.canvas.removeEventListener('contextmenu', this.handleContextMenu)
     window.removeEventListener('mousemove', this.handleMouseMove)
+    window.removeEventListener('mousemove', this.handleWindowMouseMove)
     window.removeEventListener('mouseup', this.handleMouseUp)
     window.removeEventListener('touchmove', this.handleTouchMove)
     window.removeEventListener('touchend', this.handleTouchEnd)
@@ -425,6 +457,30 @@ export class Pet {
     this.endDrag(this.lastDragX, this.lastDragY)
   }
 
+  private handleWindowMouseMove = (e: MouseEvent): void => {
+    this.mouseX = e.clientX
+    this.mouseY = e.clientY
+    this.lastMouseMoveTime = Date.now()
+  }
+
+  private handleCanvasMouseOver = (e: MouseEvent): void => {
+    if (this.dragging || this.behaviorLocked) return
+    if (this.action === 'fall' || this.bouncing || this.surfaceMode === 'climbing') return
+
+    // Face the cursor
+    const petCenterX = this.x + PET_SIZE / 2
+    this.direction = e.clientX > petCenterX ? 1 : -1
+    this.action = 'idle'
+    this.animFrame = 0
+    this.stateTimer = 30
+  }
+
+  private handleContextMenu = (e: MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    this._onContextMenu?.(e.clientX, e.clientY)
+  }
+
   private handleResize = (): void => {
     this.groundY = window.innerHeight - GROUND_Y_OFFSET - PET_SIZE
     this.x = clamp(this.x, 0, window.innerWidth - PET_SIZE)
@@ -493,6 +549,16 @@ export class Pet {
     // Squash animation update
     this.updateSquash()
 
+    // Decrement mouse reaction cooldown
+    if (this.mouseReactionCooldown > 0) {
+      this.mouseReactionCooldown--
+    }
+
+    // ── Fast mouse reaction ─────────────────────────
+    if (this.mouseReactionCooldown <= 0 && !this.behaviorLocked && this.lastMouseMoveTime > 0) {
+      this.checkFastMouseReaction()
+    }
+
     // Periodically refresh active platform position from DOM
     this.platformRefreshCounter++
     if (this.platformRefreshCounter >= PLATFORM_REFRESH_TICKS) {
@@ -513,6 +579,32 @@ export class Pet {
         this.animFrame = 0
         this.stateTimer = randInt(30, 90)
         this.behaviorLocked = false
+      }
+
+      this.updateCanvasPosition()
+      return
+    }
+
+    // ── Flying ──────────────────────────────────────
+    if (this.flying) {
+      const dx = this.flyTargetX - this.x
+      const dy = this.flyTargetY - this.y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+
+      if (dist < 10 || this.stateTimer <= 0) {
+        // Reached target or timed out — start falling
+        this.flying = false
+        this.action = 'fall'
+        this.velocityY = 0
+        this.velocityX = this.direction * WALK_SPEED * 0.3
+        this.behaviorLocked = true
+        this.animFrame = 0
+      } else {
+        const speed = RUN_SPEED * 0.8
+        this.x += (dx / dist) * speed
+        this.y += (dy / dist) * speed
+        this.direction = dx > 0 ? 1 : -1
+        this.stateTimer--
       }
 
       this.updateCanvasPosition()
@@ -645,12 +737,115 @@ export class Pet {
       this.checkArrivalAtPlatform()
     }
 
+    // ── Mouse approach (nuzzle) arrival check ─────
+    if (this.approachingMouse && this.action === 'walk') {
+      const petCenterX = this.x + PET_SIZE / 2
+      const distToMouse = Math.abs(petCenterX - this.mouseX)
+      if (distToMouse < 30) {
+        this.action = 'happy'
+        this.animFrame = 0
+        this.stateTimer = 60
+        this.approachingMouse = false
+        this.mouseReactionCooldown = 90
+      }
+    }
+
+    // ── Long idle mouse approach (nuzzle cursor) ──
+    if (
+      this.surfaceMode === 'ground' &&
+      this.action === 'idle' &&
+      !this.behaviorLocked &&
+      !this.approachingMouse &&
+      this.mouseReactionCooldown <= 0 &&
+      this.lastMouseMoveTime > 0 &&
+      Date.now() - this.lastMouseMoveTime > 10000
+    ) {
+      const petCenterX = this.x + PET_SIZE / 2
+      const distToMouse = Math.abs(petCenterX - this.mouseX)
+      const mouseInViewport =
+        this.mouseX > 0 &&
+        this.mouseX < window.innerWidth &&
+        this.mouseY > 0 &&
+        this.mouseY < window.innerHeight
+
+      if (distToMouse > 100 && mouseInViewport) {
+        this.direction = this.mouseX > petCenterX ? 1 : -1
+        this.action = 'walk'
+        this.animFrame = 0
+        // Estimate frames to reach mouse at walk speed
+        this.stateTimer = Math.ceil(distToMouse / WALK_SPEED) + 30
+        this.approachingMouse = true
+      }
+    }
+
     // Snap to ground if somehow below
     if (this.y > this.groundY) {
       this.y = this.groundY
     }
 
     this.updateCanvasPosition()
+  }
+
+  // ── Mouse reaction helpers ──────────────────────────────
+
+  private lastFastCheckMouseX = 0
+  private lastFastCheckMouseY = 0
+  private lastFastCheckTime = 0
+
+  /** Check if mouse moved fast near the pet and trigger personality-based reaction */
+  private checkFastMouseReaction(): void {
+    const now = Date.now()
+    const dt = (now - this.lastFastCheckTime) / 1000  // seconds
+
+    if (this.lastFastCheckTime === 0 || dt <= 0 || dt > 0.5) {
+      // First check or too long between checks — just record position
+      this.lastFastCheckMouseX = this.mouseX
+      this.lastFastCheckMouseY = this.mouseY
+      this.lastFastCheckTime = now
+      return
+    }
+
+    this.lastFastCheckTime = now
+
+    const dx = this.mouseX - this.lastFastCheckMouseX
+    const dy = this.mouseY - this.lastFastCheckMouseY
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    const velocity = dist / dt  // px/s
+
+    this.lastFastCheckMouseX = this.mouseX
+    this.lastFastCheckMouseY = this.mouseY
+
+    if (velocity <= 500) return
+
+    // Check proximity to pet
+    const petCenterX = this.x + PET_SIZE / 2
+    const petCenterY = this.y + PET_SIZE / 2
+    const distToPetX = this.mouseX - petCenterX
+    const distToPetY = this.mouseY - petCenterY
+    const distToPet = Math.sqrt(distToPetX * distToPetX + distToPetY * distToPetY)
+
+    if (distToPet > 200) return
+
+    // Don't interrupt active states
+    if (this.action === 'fall' || this.bouncing || this.surfaceMode === 'climbing') return
+
+    // React based on personality
+    if (this.personality.cautious_bold < 0) {
+      // Cautious: get scared
+      this.action = 'sad'
+      this.animFrame = 0
+      this.stateTimer = 45
+      this.behaviorLocked = true
+    } else if (this.personality.cautious_bold > 0) {
+      // Bold: walk/run toward cursor
+      this.direction = this.mouseX > petCenterX ? 1 : -1
+      this.action = 'walk'
+      this.animFrame = 0
+      this.stateTimer = 60
+    }
+
+    // 3 second cooldown (~90 frames at 30fps)
+    this.mouseReactionCooldown = 90
   }
 
   // ── Behavior state machine ────────────────────────────
@@ -713,6 +908,21 @@ export class Pet {
         this.animFrame = 0
         return
       }
+    }
+
+    // ── Flying (teen / adult only) ────────────────
+    if (this.surfaceMode === 'ground' && (this.stage === 'teen' || this.stage === 'adult') && Math.random() < 0.08) {
+      this.flyTargetX = Math.random() * (window.innerWidth - PET_SIZE)
+      this.flyTargetY = window.innerHeight * (0.2 + Math.random() * 0.4)
+      const dx = this.flyTargetX - this.x
+      const dy = this.flyTargetY - this.y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      this.action = 'fly'
+      this.flying = true
+      this.behaviorLocked = true
+      this.stateTimer = Math.max(120, Math.min(240, Math.ceil(dist / (RUN_SPEED * 0.8))))
+      this.animFrame = 0
+      return
     }
 
     // Normal ground behaviors

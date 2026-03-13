@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // claude-code/petclaw/src/shared/constants.ts
+  // src/shared/constants.ts
   var DECAY_INTERVAL = 5 * 60 * 1e3;
   var PROACTIVE_SPEAK_INTERVAL = 30 * 60 * 1e3;
   var IDLE_THRESHOLD = 2 * 60 * 60 * 1e3;
@@ -60,7 +60,96 @@
   };
   var DEFAULT_SLEEP_TIMEOUT = 30 * 60 * 1e3;
 
-  // claude-code/petclaw/src/popup/index.ts
+  // src/shared/zip.ts
+  function crc32(data) {
+    let crc = 4294967295;
+    for (let i = 0; i < data.length; i++) {
+      crc ^= data[i];
+      for (let j = 0; j < 8; j++) {
+        crc = crc >>> 1 ^ (crc & 1 ? 3988292384 : 0);
+      }
+    }
+    return (crc ^ 4294967295) >>> 0;
+  }
+  function writeU16(buf, offset, value) {
+    buf[offset] = value & 255;
+    buf[offset + 1] = value >>> 8 & 255;
+  }
+  function writeU32(buf, offset, value) {
+    buf[offset] = value & 255;
+    buf[offset + 1] = value >>> 8 & 255;
+    buf[offset + 2] = value >>> 16 & 255;
+    buf[offset + 3] = value >>> 24 & 255;
+  }
+  function createZip(files) {
+    const encoder = new TextEncoder();
+    const entries = files.map((f) => ({
+      name: f.name,
+      data: encoder.encode(f.content)
+    }));
+    const parts = [];
+    const centralHeaders = [];
+    let offset = 0;
+    for (const entry of entries) {
+      const nameBytes = encoder.encode(entry.name);
+      const crc = crc32(entry.data);
+      const local = new Uint8Array(30 + nameBytes.length);
+      writeU32(local, 0, 67324752);
+      writeU16(local, 4, 20);
+      writeU16(local, 6, 0);
+      writeU16(local, 8, 0);
+      writeU16(local, 10, 0);
+      writeU16(local, 12, 0);
+      writeU32(local, 14, crc);
+      writeU32(local, 18, entry.data.length);
+      writeU32(local, 22, entry.data.length);
+      writeU16(local, 26, nameBytes.length);
+      writeU16(local, 28, 0);
+      local.set(nameBytes, 30);
+      const central = new Uint8Array(46 + nameBytes.length);
+      writeU32(central, 0, 33639248);
+      writeU16(central, 4, 20);
+      writeU16(central, 6, 20);
+      writeU16(central, 8, 0);
+      writeU16(central, 10, 0);
+      writeU16(central, 12, 0);
+      writeU16(central, 14, 0);
+      writeU32(central, 16, crc);
+      writeU32(central, 20, entry.data.length);
+      writeU32(central, 24, entry.data.length);
+      writeU16(central, 28, nameBytes.length);
+      writeU16(central, 30, 0);
+      writeU16(central, 32, 0);
+      writeU16(central, 34, 0);
+      writeU16(central, 36, 0);
+      writeU32(central, 38, 0);
+      writeU32(central, 42, offset);
+      central.set(nameBytes, 46);
+      parts.push(local);
+      parts.push(entry.data);
+      centralHeaders.push(central);
+      offset += local.length + entry.data.length;
+    }
+    const centralDirOffset = offset;
+    let centralDirSize = 0;
+    for (const ch of centralHeaders) {
+      parts.push(ch);
+      centralDirSize += ch.length;
+    }
+    const eocd = new Uint8Array(22);
+    writeU32(eocd, 0, 101010256);
+    writeU16(eocd, 4, 0);
+    writeU16(eocd, 6, 0);
+    writeU16(eocd, 8, entries.length);
+    writeU16(eocd, 10, entries.length);
+    writeU32(eocd, 12, centralDirSize);
+    writeU32(eocd, 16, centralDirOffset);
+    writeU16(eocd, 20, 0);
+    parts.push(eocd);
+    return new Blob(parts, { type: "application/zip" });
+  }
+
+  // src/popup/index.ts
   var $ = (id) => {
     const el = document.getElementById(id);
     if (!el) throw new Error(`[PetClaw] Missing element #${id}`);
@@ -261,10 +350,18 @@ Auth: ${provider === "claude" ? "x-api-key" : "Bearer"} ${apiKey.slice(0, 4)}***
     const res = await send({ type: "EXPORT" });
     if (!res.ok || !res.exportData) return;
     const data = res.exportData;
-    downloadFile("SOUL.md", data.soul);
-    downloadFile("MEMORY.md", data.memory);
-    downloadFile("USER.md", data.user);
-    downloadFile("IDENTITY.md", data.id);
+    const zip = createZip([
+      { name: "SOUL.md", content: data.soul },
+      { name: "MEMORY.md", content: data.memory },
+      { name: "USER.md", content: data.user },
+      { name: "IDENTITY.md", content: data.id }
+    ]);
+    const url = URL.createObjectURL(zip);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "petclaw-export.zip";
+    a.click();
+    URL.revokeObjectURL(url);
   });
   var currentPreview = "soul";
   var previewFiles = [
@@ -302,15 +399,6 @@ Auth: ${provider === "claude" ? "x-api-key" : "Bearer"} ${apiKey.slice(0, 4)}***
       });
     });
   });
-  function downloadFile(filename, content) {
-    const blob = new Blob([content], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
   loadState();
   loadSettings();
 })();
