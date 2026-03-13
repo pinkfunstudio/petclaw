@@ -54,6 +54,37 @@ export interface PetState {
   lastInteraction: number
   lastDecay: number              // last time hunger/happiness decayed
   createdAt: number
+
+  // Sleep
+  isSleeping?: boolean
+  lastSleepStart?: number
+  dreamCompleted?: boolean
+}
+
+// ── Deep Profile (AI dream analysis → SOUL.md / USER.md) ──
+
+export interface DeepProfile {
+  // Big Five personality
+  openness: number               // 0-1
+  conscientiousness: number      // 0-1
+  extraversion: number           // 0-1
+  agreeableness: number          // 0-1
+  neuroticism: number            // 0-1
+
+  // Communication & behavioral patterns
+  communicationStyle: string
+  humorPreference: string
+  emotionalPatterns: string
+  patienceLevel: string
+  decisionMakingStyle: string
+  stressIndicators: string[]
+  interestsDepth: Record<string, string>
+
+  // Meta
+  analyzedAt: number
+  analyzedMessages: number
+  confidence: number             // 0-1
+  summary: string
 }
 
 // ── User Profile (→ USER.md) ──────────────────────────
@@ -119,6 +150,7 @@ export type MessageToBackground =
   | { type: 'GET_SETTINGS' }
   | { type: 'SYNC_POSITION'; x: number; direction: 1 | -1 }
   | { type: 'GET_CHAT_HISTORY' }
+  | { type: 'WAKE_PET' }
 
 export type MessageToContent =
   | { type: 'STATE_UPDATE'; state: PetState }
@@ -126,6 +158,7 @@ export type MessageToContent =
   | { type: 'LLM_DONE'; fullText: string }
   | { type: 'PET_SPEAK'; text: string }
   | { type: 'CHAT_UPDATE'; messages: ChatMessage[] }
+  | { type: 'PET_SLEEP'; sleeping: boolean }
 
 export type BackgroundResponse =
   | { ok: true; state?: PetState; settings?: Settings; exportData?: ExportData; chatHistory?: ChatMessage[] }
@@ -143,6 +176,8 @@ export interface Settings {
   petName: string
   enableBrowsingTracker: boolean
   petVisible: boolean
+  sleepTimeoutMinutes: number    // default 30
+  enableDreamAnalysis: boolean   // default true
 }
 
 // ── Export ──────────────────────────────────────────────

@@ -285,6 +285,16 @@ function initPetClaw() {
             chatUI.appendMessage(msg.role === 'pet' ? 'pet' : 'user', msg.content)
           }
           break
+
+        case 'PET_SLEEP':
+          if (message.sleeping) {
+            pet.setAction('sleep')
+            chatUI.showBubble('Zzz... dreaming...')
+          } else {
+            pet.setAction('happy')
+            chatUI.showBubble('Good morning!')
+          }
+          break
       }
     } catch (err: any) {
       if (err?.message?.includes('Extension context invalidated')) {

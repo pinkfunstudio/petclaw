@@ -5,13 +5,13 @@
  * Follows the official OpenClaw template format:
  *   https://docs.openclaw.ai/reference/templates/
  *
- * - SOUL.md: Core Truths → Boundaries → Vibe → Continuity
+ * - SOUL.md: Core Truths → Deep Insights → Boundaries → Vibe → Continuity
  * - IDENTITY.md: 5-field format (Name, Creature, Vibe, Emoji, Avatar)
- * - USER.md: Name, Timezone, Notes, Context
+ * - USER.md: Timezone, Schedule, Context, Behavioral Patterns
  * - MEMORY.md: Curated experiences from gameplay journey
  */
 
-import type { PetState, UserProfile, MemoryStore, ExportData } from '../shared/types'
+import type { PetState, UserProfile, MemoryStore, ExportData, DeepProfile } from '../shared/types'
 import { STAGE_NAMES } from '../shared/constants'
 
 // ── Helpers ──────────────────────────────────────────────
@@ -28,6 +28,16 @@ function topEntries(record: Record<string, number>, n: number): Array<[string, n
   return Object.entries(record)
     .sort((a, b) => b[1] - a[1])
     .slice(0, n)
+}
+
+// ── Big Five label helper ───────────────────────────────
+
+function big5Label(value: number): string {
+  if (value >= 0.75) return 'very high'
+  if (value >= 0.55) return 'high'
+  if (value >= 0.45) return 'moderate'
+  if (value >= 0.25) return 'low'
+  return 'very low'
 }
 
 // ── Personality → natural language ───────────────────────
@@ -115,9 +125,63 @@ function deriveVibe(p: PetState['personality']): string {
   return traits.join('. ') + '.'
 }
 
+// ── Deep Insights section (from AI dream analysis) ──────
+
+function renderDeepInsights(dp: DeepProfile): string {
+  const lines: string[] = []
+
+  lines.push('## Deep Insights')
+  lines.push('')
+  lines.push(`> ${dp.summary}`)
+  lines.push('')
+
+  // Big Five
+  lines.push('### Personality Profile')
+  lines.push('')
+  lines.push(`| Trait | Score | Level |`)
+  lines.push(`|-------|-------|-------|`)
+  lines.push(`| Openness | ${dp.openness.toFixed(2)} | ${big5Label(dp.openness)} |`)
+  lines.push(`| Conscientiousness | ${dp.conscientiousness.toFixed(2)} | ${big5Label(dp.conscientiousness)} |`)
+  lines.push(`| Extraversion | ${dp.extraversion.toFixed(2)} | ${big5Label(dp.extraversion)} |`)
+  lines.push(`| Agreeableness | ${dp.agreeableness.toFixed(2)} | ${big5Label(dp.agreeableness)} |`)
+  lines.push(`| Neuroticism | ${dp.neuroticism.toFixed(2)} | ${big5Label(dp.neuroticism)} |`)
+  lines.push('')
+
+  // Behavioral patterns
+  lines.push('### How They Communicate')
+  lines.push('')
+  lines.push(`- **Style:** ${dp.communicationStyle}`)
+  lines.push(`- **Humor:** ${dp.humorPreference}`)
+  lines.push(`- **Emotions:** ${dp.emotionalPatterns}`)
+  lines.push(`- **Patience:** ${dp.patienceLevel}`)
+  lines.push(`- **Decisions:** ${dp.decisionMakingStyle}`)
+  lines.push('')
+
+  // Stress indicators
+  if (dp.stressIndicators.length > 0) {
+    lines.push('### Stress Signals')
+    lines.push('')
+    for (const s of dp.stressIndicators) {
+      lines.push(`- ${s}`)
+    }
+    lines.push('')
+  }
+
+  // Confidence note
+  lines.push(`_Analyzed ${dp.analyzedMessages} messages on ${formatDate(dp.analyzedAt)}. Confidence: ${Math.round(dp.confidence * 100)}%._`)
+  lines.push('')
+
+  return lines.join('\n')
+}
+
 // ── SOUL.md (OpenClaw standard format) ───────────────────
 
-export function generateSoul(state: PetState, profile: UserProfile, memory: MemoryStore): string {
+export function generateSoul(
+  state: PetState,
+  profile: UserProfile,
+  memory: MemoryStore,
+  deepProfile?: DeepProfile | null,
+): string {
   const age = daysOld(state.birthday)
   const truths = deriveCoreTruths(state.personality, profile)
 
@@ -128,13 +192,15 @@ export function generateSoul(state: PetState, profile: UserProfile, memory: Memo
     .map(pf => `- ${pf.key}`)
     .join('\n')
 
+  const deepSection = deepProfile ? '\n' + renderDeepInsights(deepProfile) : ''
+
   return `# SOUL.md
 ${state.name} — raised from an egg over ${age} days of real interaction.
 
 ## Core Truths
 
 ${truths.map(t => `- ${t}`).join('\n')}
-
+${deepSection}
 ## Boundaries
 
 - Private information stays private — never share personal data externally
@@ -235,7 +301,7 @@ export function generateMemory(state: PetState, memory: MemoryStore): string {
 
 // ── USER.md (OpenClaw standard format) ───────────────────
 
-export function generateUser(profile: UserProfile): string {
+export function generateUser(profile: UserProfile, deepProfile?: DeepProfile | null): string {
   // Peak hours
   const peakHours = profile.activeHours
     .map((count, hour) => ({ hour, count }))
@@ -262,6 +328,30 @@ export function generateUser(profile: UserProfile): string {
     ? `Most active around ${peakHours.join(', ')}${peakDays.length > 0 ? `, especially on ${peakDays.join(', ')}` : ''}`
     : 'Not enough data yet'
 
+  // Deep interests from AI analysis
+  let deepInterestsSection = ''
+  let behavioralSection = ''
+  if (deepProfile) {
+    const interests = Object.entries(deepProfile.interestsDepth)
+    if (interests.length > 0) {
+      deepInterestsSection = '\n## Deep Interests\n\n' +
+        interests.map(([topic, depth]) => `- **${topic}:** ${depth}`).join('\n') +
+        '\n'
+    }
+
+    behavioralSection = `\n## Behavioral Patterns
+
+- **Patience:** ${deepProfile.patienceLevel}
+- **Emotional pattern:** ${deepProfile.emotionalPatterns}
+- **Communication style:** ${deepProfile.communicationStyle}
+- **Decision-making:** ${deepProfile.decisionMakingStyle}
+- **Humor:** ${deepProfile.humorPreference}
+`
+    if (deepProfile.stressIndicators.length > 0) {
+      behavioralSection += `- **Stress signals:** ${deepProfile.stressIndicators.join('; ')}\n`
+    }
+  }
+
   return `# USER.md — About Your Human
 
 - **Timezone:** ${profile.timezone}
@@ -272,7 +362,7 @@ export function generateUser(profile: UserProfile): string {
 ## Context
 
 ${topicLines.length > 0 ? 'Interests: ' + topicLines.join(', ') : '_Still discovering..._'}
-`
+${deepInterestsSection}${behavioralSection}`
 }
 
 // ── IDENTITY.md (OpenClaw 5-field format) ────────────────
@@ -304,11 +394,16 @@ export function generateIdentity(state: PetState): string {
 
 // ── Generate All ─────────────────────────────────────────
 
-export function generateAll(state: PetState, profile: UserProfile, memory: MemoryStore): ExportData {
+export function generateAll(
+  state: PetState,
+  profile: UserProfile,
+  memory: MemoryStore,
+  deepProfile?: DeepProfile | null,
+): ExportData {
   return {
-    soul: generateSoul(state, profile, memory),
+    soul: generateSoul(state, profile, memory, deepProfile),
     memory: generateMemory(state, memory),
-    user: generateUser(profile),
+    user: generateUser(profile, deepProfile),
     id: generateIdentity(state),
   }
 }

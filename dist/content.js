@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // src/shared/constants.ts
+  // claude-code/petclaw/src/shared/constants.ts
   var DECAY_INTERVAL = 5 * 60 * 1e3;
   var PROACTIVE_SPEAK_INTERVAL = 30 * 60 * 1e3;
   var IDLE_THRESHOLD = 2 * 60 * 60 * 1e3;
@@ -19,8 +19,9 @@
     teen: "Teen",
     adult: "Adult"
   };
+  var DEFAULT_SLEEP_TIMEOUT = 30 * 60 * 1e3;
 
-  // src/content/sprites.ts
+  // claude-code/petclaw/src/content/sprites.ts
   var EGG_PALETTE = {
     0: "transparent",
     1: "#e85d4a",
@@ -833,7 +834,7 @@
     };
   }
 
-  // src/content/pet.ts
+  // claude-code/petclaw/src/content/pet.ts
   function clamp(v, min, max) {
     return Math.max(min, Math.min(max, v));
   }
@@ -1527,7 +1528,7 @@
     }
   };
 
-  // src/content/chat.ts
+  // claude-code/petclaw/src/content/chat.ts
   var SHADOW_STYLES = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -2014,7 +2015,7 @@
     }
   };
 
-  // src/content/elements.ts
+  // claude-code/petclaw/src/content/elements.ts
   var MIN_PLATFORM_WIDTH = PET_SIZE;
   var MIN_PLATFORM_HEIGHT = 16;
   var MAX_PLATFORMS = 15;
@@ -2146,7 +2147,7 @@
     }
   };
 
-  // src/content/index.ts
+  // claude-code/petclaw/src/content/index.ts
   var ACTIVE_INSTANCE_KEY = "petclawActiveInstance";
   var SHUTDOWN_EVENT = "petclaw:shutdown";
   window.addEventListener("unhandledrejection", (e) => {
@@ -2362,6 +2363,15 @@
           case "CHAT_UPDATE":
             for (const msg of message.messages) {
               chatUI.appendMessage(msg.role === "pet" ? "pet" : "user", msg.content);
+            }
+            break;
+          case "PET_SLEEP":
+            if (message.sleeping) {
+              pet.setAction("sleep");
+              chatUI.showBubble("Zzz... dreaming...");
+            } else {
+              pet.setAction("happy");
+              chatUI.showBubble("Good morning!");
             }
             break;
         }

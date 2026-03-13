@@ -106,6 +106,8 @@ async function loadSettings() {
     ;($('input-baseurl') as HTMLInputElement).value = s.apiBaseUrl
     ;($('input-apikey') as HTMLInputElement).value = s.apiKey
     ;($('input-model') as HTMLInputElement).value = s.model
+    ;($('input-sleep-timeout') as HTMLInputElement).value = String(s.sleepTimeoutMinutes ?? 30)
+    ;($('input-dream-analysis') as HTMLInputElement).checked = s.enableDreamAnalysis !== false
     ;($('input-tracking') as HTMLInputElement).checked = s.enableBrowsingTracker
     ;($('input-visible') as HTMLInputElement).checked = s.petVisible
   } catch (err) {
@@ -122,6 +124,8 @@ function readFormSettings(): Partial<Settings> {
     apiBaseUrl: ($('input-baseurl') as HTMLInputElement).value.trim(),
     apiKey: ($('input-apikey') as HTMLInputElement).value.trim(),
     model: ($('input-model') as HTMLInputElement).value.trim(),
+    sleepTimeoutMinutes: parseInt(($('input-sleep-timeout') as HTMLInputElement).value) || 30,
+    enableDreamAnalysis: ($('input-dream-analysis') as HTMLInputElement).checked,
     enableBrowsingTracker: ($('input-tracking') as HTMLInputElement).checked,
     petVisible: ($('input-visible') as HTMLInputElement).checked,
   }

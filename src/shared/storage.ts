@@ -1,4 +1,4 @@
-import type { PetState, UserProfile, MemoryStore, ChatMessage, Settings, ExportData } from './types'
+import type { PetState, UserProfile, MemoryStore, ChatMessage, Settings, ExportData, DeepProfile } from './types'
 import { DEFAULT_SETTINGS } from './constants'
 
 // ── Storage keys ───────────────────────────────────────
@@ -11,6 +11,7 @@ const KEYS = {
   SETTINGS: 'petclaw_settings',
   EXPORT_DATA: 'petclaw_export_data',
   EXPORT_UPDATED: 'petclaw_export_updated',
+  DEEP_PROFILE: 'petclaw_deep_profile',
 } as const
 
 // ── Generic get/set ────────────────────────────────────
@@ -63,6 +64,9 @@ export function createDefaultPetState(name: string): PetState {
     y: 0,
     direction: 1,
     currentAction: 'idle',
+    isSleeping: false,
+    lastSleepStart: 0,
+    dreamCompleted: false,
     lastFed: now,
     lastInteraction: now,
     lastDecay: now,
@@ -150,4 +154,14 @@ export async function saveExportData(data: ExportData): Promise<void> {
 
 export async function getExportUpdated(): Promise<number> {
   return (await get<number>(KEYS.EXPORT_UPDATED)) ?? 0
+}
+
+// ── Deep Profile (AI dream analysis) ──────────────────
+
+export async function getDeepProfile(): Promise<DeepProfile | null> {
+  return get<DeepProfile>(KEYS.DEEP_PROFILE)
+}
+
+export async function saveDeepProfile(profile: DeepProfile): Promise<void> {
+  await set(KEYS.DEEP_PROFILE, profile)
 }

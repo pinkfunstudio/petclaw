@@ -20,16 +20,20 @@ import {
   PERSONALITY_SHIFT, STAGE_NAMES,
 } from '../shared/constants'
 import {
+  MIN_MESSAGES_FOR_DREAM,
+} from '../shared/constants'
+import {
   getPetState, savePetState, createDefaultPetState,
   getUserProfile, saveUserProfile,
   getMemoryStore, saveMemoryStore,
   getChatHistory, saveChatHistory,
   getSettings, saveSettings,
-  saveExportData,
+  saveExportData, getDeepProfile, saveDeepProfile,
 } from '../shared/storage'
 import { chatWithLLM } from './llm'
 import { generateAll } from './profiler'
 import { trackActivity, trackMessage, trackFeedback } from './tracker'
+import { analyzeDream } from './dreamer'
 
 // ── Alarm name ──────────────────────────────────────────
 
@@ -45,13 +49,14 @@ function scheduleExportRegen(): void {
   regenTimer = setTimeout(async () => {
     regenTimer = null
     try {
-      const [state, profile, memory] = await Promise.all([
+      const [state, profile, memory, deepProfile] = await Promise.all([
         getPetState(),
         getUserProfile(),
         getMemoryStore(),
+        getDeepProfile(),
       ])
       if (!state) return
-      const exportData = generateAll(state, profile, memory)
+      const exportData = generateAll(state, profile, memory, deepProfile)
       await saveExportData(exportData)
     } catch {
       // Non-critical — silent fail
@@ -288,6 +293,52 @@ async function broadcastChat(messages: ChatMessage[], excludeTabId?: number): Pr
   }
 }
 
+async function broadcastSleep(sleeping: boolean): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({})
+    const message: MessageToContent = { type: 'PET_SLEEP', sleeping }
+    for (const tab of tabs) {
+      if (tab.id != null) {
+        chrome.tabs.sendMessage(tab.id, message).catch(() => {})
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+/** Wake pet if sleeping, returns updated state */
+function wakeIfSleeping(state: PetState): PetState {
+  if (state.isSleeping) {
+    return { ...state, isSleeping: false, currentAction: 'idle' }
+  }
+  return state
+}
+
+/** Fire-and-forget dream analysis during sleep */
+async function triggerDreamAnalysis(settings: Settings): Promise<void> {
+  const chatHistory = await getChatHistory()
+  const userMsgCount = chatHistory.filter(m => m.role === 'user').length
+  if (userMsgCount < MIN_MESSAGES_FOR_DREAM) {
+    console.log('[PetClaw] Not enough messages for dream analysis')
+    return
+  }
+
+  const profile = await getUserProfile()
+  const deepProfile = await analyzeDream(chatHistory, profile, settings)
+  if (!deepProfile) return
+
+  await saveDeepProfile(deepProfile)
+  console.log(`[PetClaw] Dream analysis complete — analyzed ${deepProfile.analyzedMessages} messages, confidence ${Math.round(deepProfile.confidence * 100)}%`)
+
+  // Mark dream as completed
+  const state = await getPetState()
+  if (state) {
+    await savePetState({ ...state, dreamCompleted: true })
+  }
+
+  // Regenerate export files with new deep insights
+  scheduleExportRegen()
+}
+
 function getMessageTargetOptions(sender: chrome.runtime.MessageSender): chrome.tabs.MessageSendOptions | undefined {
   if (sender.documentId) {
     return { documentId: sender.documentId }
@@ -348,6 +399,12 @@ async function handleMessage(
 
       let state = await getPetState()
       if (!state) return { ok: false, error: 'No pet state found' }
+
+      // Wake pet if sleeping
+      if (state.isSleeping) {
+        state = wakeIfSleeping(state)
+        void broadcastSleep(false)
+      }
 
       let profile = await getUserProfile()
       let memory = await getMemoryStore()
@@ -462,6 +519,12 @@ async function handleMessage(
       let state = await getPetState()
       if (!state) return { ok: false, error: 'No pet state found' }
 
+      // Wake pet if sleeping
+      if (state.isSleeping) {
+        state = wakeIfSleeping(state)
+        void broadcastSleep(false)
+      }
+
       let profile = await getUserProfile()
       profile = trackActivity(profile)
 
@@ -488,6 +551,12 @@ async function handleMessage(
     case 'PET_INTERACTION': {
       let state = await getPetState()
       if (!state) return { ok: false, error: 'No pet state found' }
+
+      // Wake pet if sleeping
+      if (state.isSleeping) {
+        state = wakeIfSleeping(state)
+        void broadcastSleep(false)
+      }
 
       state = { ...state }
       state.experience += XP_INTERACTION
@@ -518,14 +587,30 @@ async function handleMessage(
       return { ok: true, chatHistory }
     }
 
+    // ── WAKE_PET ───────────────────────────────────────
+    case 'WAKE_PET': {
+      let state = await getPetState()
+      if (!state) return { ok: false, error: 'No pet state found' }
+      if (state.isSleeping) {
+        state = { ...state, isSleeping: false, currentAction: 'idle' }
+        await savePetState(state)
+        await broadcastSleep(false)
+        await broadcastState(state)
+      }
+      return { ok: true, state }
+    }
+
     // ── EXPORT ────────────────────────────────────────
     case 'EXPORT': {
       const state = await getPetState()
       if (!state) return { ok: false, error: 'No pet state found' }
 
-      const profile = await getUserProfile()
-      const memory = await getMemoryStore()
-      const exportData = generateAll(state, profile, memory)
+      const [profile, memory, deepProfile] = await Promise.all([
+        getUserProfile(),
+        getMemoryStore(),
+        getDeepProfile(),
+      ])
+      const exportData = generateAll(state, profile, memory, deepProfile)
       // Also persist the latest export
       await saveExportData(exportData)
 
@@ -581,16 +666,58 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (!state) return
 
   const updated = { ...state }
-  updated.hunger = clamp(updated.hunger + HUNGER_RATE, 0, 100)
-  updated.happiness = clamp(updated.happiness - HAPPINESS_DECAY, 0, 100)
   updated.daysActive = calcDaysActive(updated.birthday)
   updated.lastDecay = Date.now()
 
-  // Energy regeneration when happiness is high (pet is "resting well")
-  if (updated.happiness > 60) {
-    updated.energy = clamp(updated.energy + 1, 0, 100)
+  // ── Sleep detection ────────────────────────────────
+  const settings = await getSettings()
+  const sleepTimeout = (settings.sleepTimeoutMinutes ?? 30) * 60 * 1000
+  const timeSinceInteraction = Date.now() - updated.lastInteraction
+
+  if (!updated.isSleeping && timeSinceInteraction >= sleepTimeout) {
+    // Pet falls asleep
+    updated.isSleeping = true
+    updated.lastSleepStart = Date.now()
+    updated.dreamCompleted = false
+    updated.currentAction = 'sleep'
+
+    console.log('[PetClaw] Pet fell asleep after inactivity')
+    await broadcastSleep(true)
+
+    // Trigger dream analysis (fire-and-forget)
+    if (settings.enableDreamAnalysis !== false && settings.apiKey) {
+      triggerDreamAnalysis(settings).catch(err => {
+        console.error('[PetClaw] Dream analysis failed:', err)
+      })
+    }
+  }
+
+  // ── Retry dream if previous attempt failed ────────
+  if (updated.isSleeping && !updated.dreamCompleted && settings.enableDreamAnalysis !== false && settings.apiKey) {
+    const timeSinceSleep = Date.now() - (updated.lastSleepStart || 0)
+    // Retry once after 10 minutes if first attempt failed
+    if (timeSinceSleep > 10 * 60 * 1000 && timeSinceSleep < 15 * 60 * 1000) {
+      triggerDreamAnalysis(settings).catch(err => {
+        console.error('[PetClaw] Dream retry failed:', err)
+      })
+    }
+  }
+
+  // ── Decay (slower when sleeping) ───────────────────
+  if (updated.isSleeping) {
+    // Sleeping: slower hunger, energy regenerates
+    updated.hunger = clamp(updated.hunger + 1, 0, 100)
+    updated.energy = clamp(updated.energy + 3, 0, 100)
+    // Happiness stable during sleep
   } else {
-    updated.energy = clamp(updated.energy - 1, 0, 100)
+    // Awake: normal decay
+    updated.hunger = clamp(updated.hunger + HUNGER_RATE, 0, 100)
+    updated.happiness = clamp(updated.happiness - HAPPINESS_DECAY, 0, 100)
+    if (updated.happiness > 60) {
+      updated.energy = clamp(updated.energy + 1, 0, 100)
+    } else {
+      updated.energy = clamp(updated.energy - 1, 0, 100)
+    }
   }
 
   await savePetState(updated)

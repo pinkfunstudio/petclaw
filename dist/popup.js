@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // src/shared/constants.ts
+  // claude-code/petclaw/src/shared/constants.ts
   var DECAY_INTERVAL = 5 * 60 * 1e3;
   var PROACTIVE_SPEAK_INTERVAL = 30 * 60 * 1e3;
   var IDLE_THRESHOLD = 2 * 60 * 60 * 1e3;
@@ -58,8 +58,9 @@
       model: ""
     }
   };
+  var DEFAULT_SLEEP_TIMEOUT = 30 * 60 * 1e3;
 
-  // src/popup/index.ts
+  // claude-code/petclaw/src/popup/index.ts
   var $ = (id) => {
     const el = document.getElementById(id);
     if (!el) throw new Error(`[PetClaw] Missing element #${id}`);
@@ -140,6 +141,8 @@
       $("input-baseurl").value = s.apiBaseUrl;
       $("input-apikey").value = s.apiKey;
       $("input-model").value = s.model;
+      $("input-sleep-timeout").value = String(s.sleepTimeoutMinutes ?? 30);
+      $("input-dream-analysis").checked = s.enableDreamAnalysis !== false;
       $("input-tracking").checked = s.enableBrowsingTracker;
       $("input-visible").checked = s.petVisible;
     } catch (err) {
@@ -153,6 +156,8 @@
       apiBaseUrl: $("input-baseurl").value.trim(),
       apiKey: $("input-apikey").value.trim(),
       model: $("input-model").value.trim(),
+      sleepTimeoutMinutes: parseInt($("input-sleep-timeout").value) || 30,
+      enableDreamAnalysis: $("input-dream-analysis").checked,
       enableBrowsingTracker: $("input-tracking").checked,
       petVisible: $("input-visible").checked
     };

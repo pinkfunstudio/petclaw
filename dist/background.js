@@ -1,4 +1,4 @@
-// src/shared/constants.ts
+// claude-code/petclaw/src/shared/constants.ts
 var STAGE_THRESHOLDS = {
   egg: 0,
   baby: 10,
@@ -28,6 +28,9 @@ var STAGE_NAMES = {
   teen: "Teen",
   adult: "Adult"
 };
+var DEFAULT_SLEEP_TIMEOUT = 30 * 60 * 1e3;
+var MIN_MESSAGES_FOR_DREAM = 10;
+var DREAM_MAX_TOKENS = 1500;
 var DEFAULT_SETTINGS = {
   provider: "minimax",
   apiKey: "",
@@ -35,10 +38,12 @@ var DEFAULT_SETTINGS = {
   model: "MiniMax-M2.5-Lightning",
   petName: "Clawfish",
   enableBrowsingTracker: false,
-  petVisible: true
+  petVisible: true,
+  sleepTimeoutMinutes: 30,
+  enableDreamAnalysis: true
 };
 
-// src/shared/storage.ts
+// claude-code/petclaw/src/shared/storage.ts
 var KEYS = {
   PET_STATE: "petclaw_pet_state",
   USER_PROFILE: "petclaw_user_profile",
@@ -46,7 +51,8 @@ var KEYS = {
   CHAT_HISTORY: "petclaw_chat_history",
   SETTINGS: "petclaw_settings",
   EXPORT_DATA: "petclaw_export_data",
-  EXPORT_UPDATED: "petclaw_export_updated"
+  EXPORT_UPDATED: "petclaw_export_updated",
+  DEEP_PROFILE: "petclaw_deep_profile"
 };
 async function get(key) {
   const result = await chrome.storage.local.get(key);
@@ -90,6 +96,9 @@ function createDefaultPetState(name) {
     y: 0,
     direction: 1,
     currentAction: "idle",
+    isSleeping: false,
+    lastSleepStart: 0,
+    dreamCompleted: false,
     lastFed: now,
     lastInteraction: now,
     lastDecay: now,
@@ -151,15 +160,21 @@ async function saveExportData(data) {
   await set(KEYS.EXPORT_DATA, data);
   await set(KEYS.EXPORT_UPDATED, Date.now());
 }
-
-// src/background/llm.ts
-async function chatWithLLM(messages, systemPrompt, apiKey, model, onChunk, provider = "minimax", apiBaseUrl = "https://api.minimax.io/v1") {
-  if (provider === "claude") {
-    return chatClaude(messages, systemPrompt, apiKey, model, onChunk);
-  }
-  return chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChunk, apiBaseUrl);
+async function getDeepProfile() {
+  return get(KEYS.DEEP_PROFILE);
 }
-async function chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChunk, apiBaseUrl) {
+async function saveDeepProfile(profile) {
+  await set(KEYS.DEEP_PROFILE, profile);
+}
+
+// claude-code/petclaw/src/background/llm.ts
+async function chatWithLLM(messages, systemPrompt, apiKey, model, onChunk, provider = "minimax", apiBaseUrl = "https://api.minimax.io/v1", maxTokens = 300) {
+  if (provider === "claude") {
+    return chatClaude(messages, systemPrompt, apiKey, model, onChunk, maxTokens);
+  }
+  return chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChunk, apiBaseUrl, maxTokens);
+}
+async function chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChunk, apiBaseUrl, maxTokens = 300) {
   try {
     const base = apiBaseUrl.replace(/\/+$/, "");
     const url = base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
@@ -176,7 +191,7 @@ async function chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChu
       body: JSON.stringify({
         model,
         messages: allMessages,
-        max_tokens: 300,
+        max_tokens: maxTokens,
         stream: true
       })
     });
@@ -236,7 +251,7 @@ async function chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChu
     return `[Error: ${message}]`;
   }
 }
-async function chatClaude(messages, systemPrompt, apiKey, model, onChunk) {
+async function chatClaude(messages, systemPrompt, apiKey, model, onChunk, maxTokens = 300) {
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -248,7 +263,7 @@ async function chatClaude(messages, systemPrompt, apiKey, model, onChunk) {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 300,
+        max_tokens: maxTokens,
         system: systemPrompt,
         messages,
         stream: true
@@ -313,7 +328,7 @@ function stripThinkTags(text) {
   return stripped.replace(/<think>[\s\S]*$/, "").trim();
 }
 
-// src/background/profiler.ts
+// claude-code/petclaw/src/background/profiler.ts
 function daysOld(birthday) {
   return Math.max(1, Math.floor((Date.now() - birthday) / (1e3 * 60 * 60 * 24)));
 }
@@ -322,6 +337,13 @@ function formatDate(timestamp) {
 }
 function topEntries(record, n) {
   return Object.entries(record).sort((a, b) => b[1] - a[1]).slice(0, n);
+}
+function big5Label(value) {
+  if (value >= 0.75) return "very high";
+  if (value >= 0.55) return "high";
+  if (value >= 0.45) return "moderate";
+  if (value >= 0.25) return "low";
+  return "very low";
 }
 function deriveCoreTruths(p, profile) {
   const truths = [];
@@ -386,17 +408,54 @@ function deriveVibe(p) {
   if (traits.length === 0) return "Adaptable. Mirrors your style while developing a voice of its own.";
   return traits.join(". ") + ".";
 }
-function generateSoul(state, profile, memory) {
+function renderDeepInsights(dp) {
+  const lines = [];
+  lines.push("## Deep Insights");
+  lines.push("");
+  lines.push(`> ${dp.summary}`);
+  lines.push("");
+  lines.push("### Personality Profile");
+  lines.push("");
+  lines.push(`| Trait | Score | Level |`);
+  lines.push(`|-------|-------|-------|`);
+  lines.push(`| Openness | ${dp.openness.toFixed(2)} | ${big5Label(dp.openness)} |`);
+  lines.push(`| Conscientiousness | ${dp.conscientiousness.toFixed(2)} | ${big5Label(dp.conscientiousness)} |`);
+  lines.push(`| Extraversion | ${dp.extraversion.toFixed(2)} | ${big5Label(dp.extraversion)} |`);
+  lines.push(`| Agreeableness | ${dp.agreeableness.toFixed(2)} | ${big5Label(dp.agreeableness)} |`);
+  lines.push(`| Neuroticism | ${dp.neuroticism.toFixed(2)} | ${big5Label(dp.neuroticism)} |`);
+  lines.push("");
+  lines.push("### How They Communicate");
+  lines.push("");
+  lines.push(`- **Style:** ${dp.communicationStyle}`);
+  lines.push(`- **Humor:** ${dp.humorPreference}`);
+  lines.push(`- **Emotions:** ${dp.emotionalPatterns}`);
+  lines.push(`- **Patience:** ${dp.patienceLevel}`);
+  lines.push(`- **Decisions:** ${dp.decisionMakingStyle}`);
+  lines.push("");
+  if (dp.stressIndicators.length > 0) {
+    lines.push("### Stress Signals");
+    lines.push("");
+    for (const s of dp.stressIndicators) {
+      lines.push(`- ${s}`);
+    }
+    lines.push("");
+  }
+  lines.push(`_Analyzed ${dp.analyzedMessages} messages on ${formatDate(dp.analyzedAt)}. Confidence: ${Math.round(dp.confidence * 100)}%._`);
+  lines.push("");
+  return lines.join("\n");
+}
+function generateSoul(state, profile, memory, deepProfile) {
   const age = daysOld(state.birthday);
   const truths = deriveCoreTruths(state.personality, profile);
   const knownPrefs = memory.preferences.filter((pf) => pf.confidence >= 0.4).slice(-5).map((pf) => `- ${pf.key}`).join("\n");
+  const deepSection = deepProfile ? "\n" + renderDeepInsights(deepProfile) : "";
   return `# SOUL.md
 ${state.name} \u2014 raised from an egg over ${age} days of real interaction.
 
 ## Core Truths
 
 ${truths.map((t) => `- ${t}`).join("\n")}
-
+${deepSection}
 ## Boundaries
 
 - Private information stays private \u2014 never share personal data externally
@@ -476,13 +535,34 @@ function generateMemory(state, memory) {
   }
   return sections.join("\n");
 }
-function generateUser(profile) {
+function generateUser(profile, deepProfile) {
   const peakHours = profile.activeHours.map((count, hour) => ({ hour, count })).sort((a, b) => b.count - a.count).filter((h) => h.count > 0).slice(0, 3).map((h) => `${String(h.hour).padStart(2, "0")}:00`);
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const peakDays = profile.activeDays.map((count, day) => ({ day, count })).sort((a, b) => b.count - a.count).filter((d) => d.count > 0).slice(0, 3).map((d) => dayNames[d.day]);
   const topics = topEntries(profile.topicDistribution, 8);
   const topicLines = topics.map(([topic]) => topic);
   const scheduleNote = peakHours.length > 0 ? `Most active around ${peakHours.join(", ")}${peakDays.length > 0 ? `, especially on ${peakDays.join(", ")}` : ""}` : "Not enough data yet";
+  let deepInterestsSection = "";
+  let behavioralSection = "";
+  if (deepProfile) {
+    const interests = Object.entries(deepProfile.interestsDepth);
+    if (interests.length > 0) {
+      deepInterestsSection = "\n## Deep Interests\n\n" + interests.map(([topic, depth]) => `- **${topic}:** ${depth}`).join("\n") + "\n";
+    }
+    behavioralSection = `
+## Behavioral Patterns
+
+- **Patience:** ${deepProfile.patienceLevel}
+- **Emotional pattern:** ${deepProfile.emotionalPatterns}
+- **Communication style:** ${deepProfile.communicationStyle}
+- **Decision-making:** ${deepProfile.decisionMakingStyle}
+- **Humor:** ${deepProfile.humorPreference}
+`;
+    if (deepProfile.stressIndicators.length > 0) {
+      behavioralSection += `- **Stress signals:** ${deepProfile.stressIndicators.join("; ")}
+`;
+    }
+  }
   return `# USER.md \u2014 About Your Human
 
 - **Timezone:** ${profile.timezone}
@@ -493,7 +573,7 @@ function generateUser(profile) {
 ## Context
 
 ${topicLines.length > 0 ? "Interests: " + topicLines.join(", ") : "_Still discovering..._"}
-`;
+${deepInterestsSection}${behavioralSection}`;
 }
 function generateIdentity(state) {
   const vibeWords = [];
@@ -516,16 +596,16 @@ function generateIdentity(state) {
 * **Avatar:** icon128.png
 `;
 }
-function generateAll(state, profile, memory) {
+function generateAll(state, profile, memory, deepProfile) {
   return {
-    soul: generateSoul(state, profile, memory),
+    soul: generateSoul(state, profile, memory, deepProfile),
     memory: generateMemory(state, memory),
-    user: generateUser(profile),
+    user: generateUser(profile, deepProfile),
     id: generateIdentity(state)
   };
 }
 
-// src/background/tracker.ts
+// claude-code/petclaw/src/background/tracker.ts
 var TOPIC_KEYWORDS = {
   crypto: ["crypto", "blockchain", "bitcoin", "btc", "eth", "ethereum", "token", "defi", "nft", "web3", "wallet", "mining", "solana", "sol", "memecoin", "airdrop"],
   dev: ["code", "coding", "programming", "typescript", "javascript", "python", "rust", "react", "api", "git", "github", "bug", "debug", "deploy", "docker", "database", "frontend", "backend", "server", "npm"],
@@ -651,7 +731,140 @@ function trackFeedback(profile, message) {
   return updated;
 }
 
-// src/background/index.ts
+// claude-code/petclaw/src/background/dreamer.ts
+function buildDreamPrompt(profile) {
+  const peakHours = profile.activeHours.map((c, h) => ({ h, c })).sort((a, b) => b.c - a.c).filter((x) => x.c > 0).slice(0, 3).map((x) => `${x.h}:00`).join(", ");
+  const topTopics = Object.entries(profile.topicDistribution).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t]) => t).join(", ");
+  const fb = profile.feedbackStyle;
+  const rp = profile.responsePreference;
+  return `You are a behavioral psychologist analyzing a user's chat messages with their virtual pet companion.
+Your job is to derive deep personality, temperament, and behavioral insights from how the user communicates.
+
+Statistical context about this user:
+- Peak active hours: ${peakHours || "unknown"}
+- Top topics mentioned: ${topTopics || "unknown"}
+- Feedback style counts: encouraging=${fb.encouraging}, strict=${fb.strict}, neutral=${fb.neutral}
+- Message length preference: short=${rp.short}, medium=${rp.medium}, long=${rp.long}
+- Total sessions: ${profile.totalSessions}
+
+Below are the user's recent messages (marked [USER]) and the pet's responses (marked [PET]).
+Focus your analysis on the USER messages \u2014 the pet responses give context only.
+
+Analyze the user's:
+1. Big Five personality traits (openness, conscientiousness, extraversion, agreeableness, neuroticism)
+2. Communication style \u2014 how do they express themselves? Terse or verbose? Direct or roundabout?
+3. Humor preference \u2014 what kind of humor do they use or respond to?
+4. Emotional patterns \u2014 what emotions show up most? How do they handle frustration?
+5. Patience level \u2014 are they patient or impatient? Do they rush or take time?
+6. Decision-making style \u2014 decisive or deliberative? Do they ask for options?
+7. Stress indicators \u2014 what behavioral shifts suggest stress or tiredness?
+8. Interests depth \u2014 how deep is their engagement with each topic?
+
+Return ONLY a valid JSON object with this exact schema (no markdown, no explanation):
+{
+  "openness": <number 0-1>,
+  "conscientiousness": <number 0-1>,
+  "extraversion": <number 0-1>,
+  "agreeableness": <number 0-1>,
+  "neuroticism": <number 0-1>,
+  "communicationStyle": "<one sentence>",
+  "humorPreference": "<one sentence>",
+  "emotionalPatterns": "<one sentence>",
+  "patienceLevel": "<one sentence>",
+  "decisionMakingStyle": "<one sentence>",
+  "stressIndicators": ["<indicator1>", "<indicator2>"],
+  "interestsDepth": { "<topic>": "<depth description>" },
+  "confidence": <number 0-1 based on how much data you had>,
+  "summary": "<one paragraph overall personality assessment>"
+}`;
+}
+function formatMessages(messages) {
+  return messages.map((m) => `[${m.role === "user" ? "USER" : "PET"}] ${m.content}`).join("\n");
+}
+function parseResponse(raw, messageCount) {
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) {
+      console.warn("[PetClaw Dream] Could not find JSON in LLM response");
+      return null;
+    }
+    try {
+      obj = JSON.parse(match[0]);
+    } catch {
+      console.warn("[PetClaw Dream] Failed to parse extracted JSON");
+      return null;
+    }
+  }
+  const clamp01 = (v) => {
+    const n = Number(v);
+    return isNaN(n) ? 0.5 : Math.max(0, Math.min(1, n));
+  };
+  const str = (v, fallback) => typeof v === "string" && v.length > 0 ? v : fallback;
+  const strArr = (v) => Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
+  const strRecord = (v) => {
+    if (!v || typeof v !== "object") return {};
+    const result = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (typeof val === "string") result[k] = val;
+    }
+    return result;
+  };
+  return {
+    openness: clamp01(obj.openness),
+    conscientiousness: clamp01(obj.conscientiousness),
+    extraversion: clamp01(obj.extraversion),
+    agreeableness: clamp01(obj.agreeableness),
+    neuroticism: clamp01(obj.neuroticism),
+    communicationStyle: str(obj.communicationStyle, "Not enough data"),
+    humorPreference: str(obj.humorPreference, "Not enough data"),
+    emotionalPatterns: str(obj.emotionalPatterns, "Not enough data"),
+    patienceLevel: str(obj.patienceLevel, "Not enough data"),
+    decisionMakingStyle: str(obj.decisionMakingStyle, "Not enough data"),
+    stressIndicators: strArr(obj.stressIndicators),
+    interestsDepth: strRecord(obj.interestsDepth),
+    analyzedAt: Date.now(),
+    analyzedMessages: messageCount,
+    confidence: clamp01(obj.confidence ?? Math.min(1, messageCount / 50)),
+    summary: str(obj.summary, "Not enough data for a summary.")
+  };
+}
+async function analyzeDream(chatHistory, profile, settings) {
+  const recent = chatHistory.slice(-50);
+  const userMsgCount = recent.filter((m) => m.role === "user").length;
+  if (userMsgCount < 5) {
+    console.log("[PetClaw Dream] Not enough user messages to analyze");
+    return null;
+  }
+  const systemPrompt = buildDreamPrompt(profile);
+  const formattedMessages = formatMessages(recent);
+  try {
+    const response = await chatWithLLM(
+      [{ role: "user", content: formattedMessages }],
+      systemPrompt,
+      settings.apiKey,
+      settings.model,
+      () => {
+      },
+      // no-op chunk handler — we only need the full response
+      settings.provider,
+      settings.apiBaseUrl,
+      DREAM_MAX_TOKENS
+    );
+    if (response.startsWith("[Error")) {
+      console.warn("[PetClaw Dream] LLM error:", response);
+      return null;
+    }
+    return parseResponse(response, userMsgCount);
+  } catch (err) {
+    console.error("[PetClaw Dream] Analysis failed:", err);
+    return null;
+  }
+}
+
+// claude-code/petclaw/src/background/index.ts
 var DECAY_ALARM = "petclaw-decay";
 var regenTimer = null;
 function scheduleExportRegen() {
@@ -659,13 +872,14 @@ function scheduleExportRegen() {
   regenTimer = setTimeout(async () => {
     regenTimer = null;
     try {
-      const [state, profile, memory] = await Promise.all([
+      const [state, profile, memory, deepProfile] = await Promise.all([
         getPetState(),
         getUserProfile(),
-        getMemoryStore()
+        getMemoryStore(),
+        getDeepProfile()
       ]);
       if (!state) return;
-      const exportData = generateAll(state, profile, memory);
+      const exportData = generateAll(state, profile, memory, deepProfile);
       await saveExportData(exportData);
     } catch {
     }
@@ -842,6 +1056,43 @@ async function broadcastChat(messages, excludeTabId) {
   } catch {
   }
 }
+async function broadcastSleep(sleeping) {
+  try {
+    const tabs = await chrome.tabs.query({});
+    const message = { type: "PET_SLEEP", sleeping };
+    for (const tab of tabs) {
+      if (tab.id != null) {
+        chrome.tabs.sendMessage(tab.id, message).catch(() => {
+        });
+      }
+    }
+  } catch {
+  }
+}
+function wakeIfSleeping(state) {
+  if (state.isSleeping) {
+    return { ...state, isSleeping: false, currentAction: "idle" };
+  }
+  return state;
+}
+async function triggerDreamAnalysis(settings) {
+  const chatHistory = await getChatHistory();
+  const userMsgCount = chatHistory.filter((m) => m.role === "user").length;
+  if (userMsgCount < MIN_MESSAGES_FOR_DREAM) {
+    console.log("[PetClaw] Not enough messages for dream analysis");
+    return;
+  }
+  const profile = await getUserProfile();
+  const deepProfile = await analyzeDream(chatHistory, profile, settings);
+  if (!deepProfile) return;
+  await saveDeepProfile(deepProfile);
+  console.log(`[PetClaw] Dream analysis complete \u2014 analyzed ${deepProfile.analyzedMessages} messages, confidence ${Math.round(deepProfile.confidence * 100)}%`);
+  const state = await getPetState();
+  if (state) {
+    await savePetState({ ...state, dreamCompleted: true });
+  }
+  scheduleExportRegen();
+}
 function getMessageTargetOptions(sender) {
   if (sender.documentId) {
     return { documentId: sender.documentId };
@@ -887,6 +1138,10 @@ async function handleMessage(msg, sender) {
       }
       let state = await getPetState();
       if (!state) return { ok: false, error: "No pet state found" };
+      if (state.isSleeping) {
+        state = wakeIfSleeping(state);
+        void broadcastSleep(false);
+      }
       let profile = await getUserProfile();
       let memory = await getMemoryStore();
       let chatHistory = await getChatHistory();
@@ -970,6 +1225,10 @@ async function handleMessage(msg, sender) {
     case "FEED": {
       let state = await getPetState();
       if (!state) return { ok: false, error: "No pet state found" };
+      if (state.isSleeping) {
+        state = wakeIfSleeping(state);
+        void broadcastSleep(false);
+      }
       let profile = await getUserProfile();
       profile = trackActivity(profile);
       state = { ...state };
@@ -992,6 +1251,10 @@ async function handleMessage(msg, sender) {
     case "PET_INTERACTION": {
       let state = await getPetState();
       if (!state) return { ok: false, error: "No pet state found" };
+      if (state.isSleeping) {
+        state = wakeIfSleeping(state);
+        void broadcastSleep(false);
+      }
       state = { ...state };
       state.experience += XP_INTERACTION;
       state.totalInteractions += 1;
@@ -1017,13 +1280,28 @@ async function handleMessage(msg, sender) {
       const chatHistory = await getChatHistory();
       return { ok: true, chatHistory };
     }
+    // ── WAKE_PET ───────────────────────────────────────
+    case "WAKE_PET": {
+      let state = await getPetState();
+      if (!state) return { ok: false, error: "No pet state found" };
+      if (state.isSleeping) {
+        state = { ...state, isSleeping: false, currentAction: "idle" };
+        await savePetState(state);
+        await broadcastSleep(false);
+        await broadcastState(state);
+      }
+      return { ok: true, state };
+    }
     // ── EXPORT ────────────────────────────────────────
     case "EXPORT": {
       const state = await getPetState();
       if (!state) return { ok: false, error: "No pet state found" };
-      const profile = await getUserProfile();
-      const memory = await getMemoryStore();
-      const exportData = generateAll(state, profile, memory);
+      const [profile, memory, deepProfile] = await Promise.all([
+        getUserProfile(),
+        getMemoryStore(),
+        getDeepProfile()
+      ]);
+      const exportData = generateAll(state, profile, memory, deepProfile);
       await saveExportData(exportData);
       return { ok: true, exportData };
     }
@@ -1063,14 +1341,43 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   const state = await getPetState();
   if (!state) return;
   const updated = { ...state };
-  updated.hunger = clamp(updated.hunger + HUNGER_RATE, 0, 100);
-  updated.happiness = clamp(updated.happiness - HAPPINESS_DECAY, 0, 100);
   updated.daysActive = calcDaysActive(updated.birthday);
   updated.lastDecay = Date.now();
-  if (updated.happiness > 60) {
-    updated.energy = clamp(updated.energy + 1, 0, 100);
+  const settings = await getSettings();
+  const sleepTimeout = (settings.sleepTimeoutMinutes ?? 30) * 60 * 1e3;
+  const timeSinceInteraction = Date.now() - updated.lastInteraction;
+  if (!updated.isSleeping && timeSinceInteraction >= sleepTimeout) {
+    updated.isSleeping = true;
+    updated.lastSleepStart = Date.now();
+    updated.dreamCompleted = false;
+    updated.currentAction = "sleep";
+    console.log("[PetClaw] Pet fell asleep after inactivity");
+    await broadcastSleep(true);
+    if (settings.enableDreamAnalysis !== false && settings.apiKey) {
+      triggerDreamAnalysis(settings).catch((err) => {
+        console.error("[PetClaw] Dream analysis failed:", err);
+      });
+    }
+  }
+  if (updated.isSleeping && !updated.dreamCompleted && settings.enableDreamAnalysis !== false && settings.apiKey) {
+    const timeSinceSleep = Date.now() - (updated.lastSleepStart || 0);
+    if (timeSinceSleep > 10 * 60 * 1e3 && timeSinceSleep < 15 * 60 * 1e3) {
+      triggerDreamAnalysis(settings).catch((err) => {
+        console.error("[PetClaw] Dream retry failed:", err);
+      });
+    }
+  }
+  if (updated.isSleeping) {
+    updated.hunger = clamp(updated.hunger + 1, 0, 100);
+    updated.energy = clamp(updated.energy + 3, 0, 100);
   } else {
-    updated.energy = clamp(updated.energy - 1, 0, 100);
+    updated.hunger = clamp(updated.hunger + HUNGER_RATE, 0, 100);
+    updated.happiness = clamp(updated.happiness - HAPPINESS_DECAY, 0, 100);
+    if (updated.happiness > 60) {
+      updated.energy = clamp(updated.energy + 1, 0, 100);
+    } else {
+      updated.energy = clamp(updated.energy - 1, 0, 100);
+    }
   }
   await savePetState(updated);
   await broadcastState(updated);

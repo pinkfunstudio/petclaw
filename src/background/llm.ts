@@ -12,12 +12,13 @@ export async function chatWithLLM(
   model: string,
   onChunk: (text: string) => void,
   provider: LLMProvider = 'minimax',
-  apiBaseUrl: string = 'https://api.minimax.io/v1'
+  apiBaseUrl: string = 'https://api.minimax.io/v1',
+  maxTokens: number = 300
 ): Promise<string> {
   if (provider === 'claude') {
-    return chatClaude(messages, systemPrompt, apiKey, model, onChunk)
+    return chatClaude(messages, systemPrompt, apiKey, model, onChunk, maxTokens)
   }
-  return chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChunk, apiBaseUrl)
+  return chatOpenAICompatible(messages, systemPrompt, apiKey, model, onChunk, apiBaseUrl, maxTokens)
 }
 
 // ── OpenAI-compatible (MiniMax, DeepSeek, etc.) ────────
@@ -28,7 +29,8 @@ async function chatOpenAICompatible(
   apiKey: string,
   model: string,
   onChunk: (text: string) => void,
-  apiBaseUrl: string
+  apiBaseUrl: string,
+  maxTokens: number = 300
 ): Promise<string> {
   try {
     // Ensure base URL doesn't end with /
@@ -52,7 +54,7 @@ async function chatOpenAICompatible(
       body: JSON.stringify({
         model,
         messages: allMessages,
-        max_tokens: 300,
+        max_tokens: maxTokens,
         stream: true,
       }),
     })
@@ -131,7 +133,8 @@ async function chatClaude(
   systemPrompt: string,
   apiKey: string,
   model: string,
-  onChunk: (text: string) => void
+  onChunk: (text: string) => void,
+  maxTokens: number = 300
 ): Promise<string> {
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -144,7 +147,7 @@ async function chatClaude(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 300,
+        max_tokens: maxTokens,
         system: systemPrompt,
         messages,
         stream: true,

@@ -124,6 +124,16 @@
         <label>Model</label>
         <input type="text" id="input-model" placeholder="MiniMax-M2.5-Lightning">
       </div>
+      <div class="form-group">
+        <label>Sleep Timeout (minutes)</label>
+        <input type="number" id="input-sleep-timeout" min="5" max="240" placeholder="30">
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="input-dream-analysis" checked>
+          Enable AI dream analysis (uses LLM during sleep)
+        </label>
+      </div>
       <button class="btn secondary" id="btn-test-api">Test API Connection</button>
       <div class="test-status" id="test-status"></div>
       <div class="form-group">

@@ -105,6 +105,11 @@ export const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
   },
 }
 
+// ── Sleep & Dream ──────────────────────────────────────
+export const DEFAULT_SLEEP_TIMEOUT = 30 * 60 * 1000   // 30 minutes of inactivity
+export const MIN_MESSAGES_FOR_DREAM = 10               // need at least 10 user messages
+export const DREAM_MAX_TOKENS = 1500                   // LLM token limit for dream analysis
+
 // ── Default settings ───────────────────────────────────
 export const DEFAULT_SETTINGS = {
   provider: 'minimax' as const,
@@ -114,4 +119,6 @@ export const DEFAULT_SETTINGS = {
   petName: 'Clawfish',
   enableBrowsingTracker: false,
   petVisible: true,
+  sleepTimeoutMinutes: 30,
+  enableDreamAnalysis: true,
 }
