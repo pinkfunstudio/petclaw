@@ -262,6 +262,25 @@ $('btn-export').addEventListener('click', async () => {
   URL.revokeObjectURL(url)
 })
 
+$('btn-update').addEventListener('click', async () => {
+  const status = $('export-status')
+  status.textContent = 'Updating files...'
+  status.style.color = '#888'
+
+  const res = await send<{ ok: boolean; exportData?: ExportData }>({ type: 'EXPORT' })
+  if (res.ok) {
+    status.textContent = 'Files updated.'
+    status.style.color = '#4ade80'
+  } else {
+    status.textContent = 'Update failed.'
+    status.style.color = '#ef4444'
+  }
+
+  setTimeout(() => {
+    status.textContent = ''
+  }, 2000)
+})
+
 // ── Preview tabs ──────────────────────────────────────────
 
 let currentPreview: keyof ExportData = 'soul'

@@ -363,6 +363,22 @@ Auth: ${provider === "claude" ? "x-api-key" : "Bearer"} ${apiKey.slice(0, 4)}***
     a.click();
     URL.revokeObjectURL(url);
   });
+  $("btn-update").addEventListener("click", async () => {
+    const status = $("export-status");
+    status.textContent = "Updating files...";
+    status.style.color = "#888";
+    const res = await send({ type: "EXPORT" });
+    if (res.ok) {
+      status.textContent = "Files updated.";
+      status.style.color = "#4ade80";
+    } else {
+      status.textContent = "Update failed.";
+      status.style.color = "#ef4444";
+    }
+    setTimeout(() => {
+      status.textContent = "";
+    }, 2e3);
+  });
   var currentPreview = "soul";
   var previewFiles = [
     { key: "soul", label: "SOUL.md" },

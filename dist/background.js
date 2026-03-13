@@ -338,6 +338,11 @@ function formatDate(timestamp) {
 function topEntries(record, n) {
   return Object.entries(record).sort((a, b) => b[1] - a[1]).slice(0, n);
 }
+var CJK_CHAR_REGEX = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/gu;
+var FULLWIDTH_CHAR_REGEX = /[\u3000-\u303F\uFF00-\uFFEF]/gu;
+function sanitizeExportText(text) {
+  return text.replace(CJK_CHAR_REGEX, "").replace(FULLWIDTH_CHAR_REGEX, " ").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+}
 function big5Label(value) {
   if (value >= 0.75) return "very high";
   if (value >= 0.55) return "high";
@@ -602,10 +607,10 @@ function generateIdentity(state) {
 }
 function generateAll(state, profile, memory, deepProfile) {
   return {
-    soul: generateSoul(state, profile, memory, deepProfile),
-    memory: generateMemory(state, memory),
-    user: generateUser(profile, deepProfile),
-    id: generateIdentity(state)
+    soul: sanitizeExportText(generateSoul(state, profile, memory, deepProfile)),
+    memory: sanitizeExportText(generateMemory(state, memory)),
+    user: sanitizeExportText(generateUser(profile, deepProfile)),
+    id: sanitizeExportText(generateIdentity(state))
   };
 }
 
