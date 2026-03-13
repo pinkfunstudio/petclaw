@@ -899,6 +899,8 @@
     pokeResetTimer = null;
     // Bounce state
     bouncing = false;
+    // Cross-tab sync: only the active (visible) tab runs physics
+    physicsEnabled = true;
     // Platform / climbing
     surfaceMode = "ground";
     activePlatform = null;
@@ -946,16 +948,37 @@
     /** Sync visual state with authoritative background state */
     updateState(state) {
       this.stage = state.stage;
-      this.direction = state.direction;
-      if (!this.dragging && this.action !== "fall" && !this.bouncing && this.surfaceMode === "ground") {
-        this.x = clamp(state.x, 0, window.innerWidth - PET_SIZE);
+      if (!this.dragging) {
+        if (!this.physicsEnabled) {
+          this.x = clamp(state.x, 0, window.innerWidth - PET_SIZE);
+          this.direction = state.direction;
+          this.action = state.currentAction;
+          this.animFrame = 0;
+        } else if (this.action !== "fall" && !this.bouncing) {
+          this.x = clamp(state.x, 0, window.innerWidth - PET_SIZE);
+          this.direction = state.direction;
+        }
       }
-      if (!this.behaviorLocked && this.action !== "fall") {
+      if (this.physicsEnabled && !this.behaviorLocked && this.action !== "fall") {
         if (state.currentAction !== this.action) {
           this.action = state.currentAction;
           this.animFrame = 0;
         }
       }
+      this.updateCanvasPosition();
+    }
+    /** Enable/disable autonomous physics (only active tab runs physics) */
+    enablePhysics(enabled) {
+      this.physicsEnabled = enabled;
+      if (!enabled) {
+        this.bouncing = false;
+        this.velocityX = 0;
+        this.velocityY = 0;
+      }
+    }
+    /** Get current position state for cross-tab sync */
+    getSyncState() {
+      return { x: this.x, direction: this.direction };
     }
     /** Force a specific action (from external trigger like feed, chat) */
     setAction(action) {
@@ -1154,9 +1177,9 @@
         return;
       }
       this.squashTimer--;
-      const t2 = this.squashTimer / SQUASH_FRAMES;
-      this.scaleX = 1 + 0.3 * t2;
-      this.scaleY = 1 - 0.3 * t2;
+      const t = this.squashTimer / SQUASH_FRAMES;
+      this.scaleX = 1 + 0.3 * t;
+      this.scaleY = 1 - 0.3 * t;
     }
     updateStretchFromVelocity() {
       if (this.action === "fall" && !this.dragging) {
@@ -1174,6 +1197,11 @@
     // ── Physics tick (movement, gravity, behavior) ────────
     physicsTick() {
       if (this.dragging) return;
+      if (!this.physicsEnabled) {
+        this.updateSquash();
+        this.updateCanvasPosition();
+        return;
+      }
       this.updateSquash();
       this.platformRefreshCounter++;
       if (this.platformRefreshCounter >= PLATFORM_REFRESH_TICKS) {
@@ -1499,48 +1527,6 @@
     }
   };
 
-  // src/shared/i18n.ts
-  var S = {
-    // Pet speech
-    yummy: { zh: "\u597D\u5403\uFF01", en: "Yummy!" },
-    connectionFailed: { zh: "\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5", en: "Connection failed, please retry" },
-    bored: { zh: "\u597D\u65E0\u804A\uFF5E", en: "I'm bored~" },
-    sleepy: { zh: "\u56F0\u4E86...", en: "Sleepy..." },
-    hungry: { zh: "\u809A\u5B50\u997F\u4E86...", en: "I'm hungry..." },
-    happy: { zh: "\u5F00\u5FC3\uFF01", en: "Happy!" },
-    missYou: { zh: "\u4F60\u53BB\u54EA\u4E86\uFF1F", en: "Where did you go?" },
-    helloThere: { zh: "\u4F60\u597D\u5440\uFF01", en: "Hello!" },
-    ouch: { zh: "\u54CE\u54DF\uFF01", en: "Ouch!" },
-    whee: { zh: "\u545C\u54C7\uFF5E", en: "Whee~" },
-    dizzy: { zh: "\u5934\u6655...", en: "Dizzy..." },
-    stopIt: { zh: "\u522B\u6233\u4E86\u5566\uFF01", en: "Stop poking!" },
-    whatUp: { zh: "\u600E\u4E48\u4E86\uFF1F", en: "What's up?" },
-    petMe: { zh: "\u6478\u6478\u6211~", en: "Pet me~" },
-    // Chat panel
-    feed: { zh: "\u{1F356} \u5582\u98DF", en: "\u{1F356} Feed" },
-    status: { zh: "\u{1F4CA} \u72B6\u6001", en: "\u{1F4CA} Status" },
-    sendBtn: { zh: "\u53D1\u9001", en: "Send" },
-    inputPlaceholder: { zh: "\u8BF4\u70B9\u4EC0\u4E48...", en: "Say something..." },
-    // Status display
-    labelStage: { zh: "\u9636\u6BB5", en: "Stage" },
-    labelXP: { zh: "\u7ECF\u9A8C", en: "XP" },
-    labelHunger: { zh: "\u9965\u997F", en: "Hunger" },
-    labelMood: { zh: "\u5FC3\u60C5", en: "Mood" },
-    labelEnergy: { zh: "\u4F53\u529B", en: "Energy" },
-    labelDays: { zh: "\u5929\u6570", en: "Days" }
-  };
-  var _lang = "en";
-  function setLang(lang) {
-    if (lang === "auto") {
-      _lang = typeof navigator !== "undefined" && navigator.language.startsWith("zh") ? "zh" : "en";
-    } else {
-      _lang = lang;
-    }
-  }
-  function t(key) {
-    return S[key][_lang];
-  }
-
   // src/content/chat.ts
   var SHADOW_STYLES = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1549,7 +1535,7 @@
     position: absolute;
     background: #fff;
     color: #333;
-    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-family: -apple-system, "Segoe UI", sans-serif;
     font-size: 13px;
     line-height: 1.4;
     padding: 8px 12px;
@@ -1592,7 +1578,7 @@
     flex-direction: column;
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-family: -apple-system, "Segoe UI", sans-serif;
     color: #e0e0e0;
     z-index: 20;
     opacity: 0;
@@ -1614,6 +1600,11 @@
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+    cursor: grab;
+    user-select: none;
+  }
+  .petclaw-panel-header.dragging {
+    cursor: grabbing;
   }
   .petclaw-panel-header .pet-name {
     font-weight: 600;
@@ -1704,7 +1695,7 @@
   }
 
   .petclaw-input-row {
-    padding: 8px 12px 12px;
+    padding: 8px 12px 8px;
     display: flex;
     gap: 8px;
     flex-shrink: 0;
@@ -1738,6 +1729,19 @@
     background: #555;
     cursor: not-allowed;
   }
+
+  .petclaw-footer {
+    padding: 4px 12px 8px;
+    text-align: center;
+    font-size: 10px;
+    color: #555;
+    flex-shrink: 0;
+  }
+  .petclaw-footer a {
+    color: #666;
+    text-decoration: none;
+  }
+  .petclaw-footer a:hover { color: #999; }
 `;
   var ChatUI = class {
     shadowRoot;
@@ -1747,6 +1751,7 @@
     bubbleTimer = null;
     // Panel
     panelEl;
+    headerEl;
     messagesEl;
     inputEl;
     sendBtn;
@@ -1756,11 +1761,12 @@
     petStage = "egg";
     nameEl;
     stageEl;
-    // Cached action buttons for i18n updates
-    feedBtn;
-    statusBtn;
     // Streaming
     streamingMsgEl = null;
+    // Drag panel
+    panelDragging = false;
+    panelDragOffsetX = 0;
+    panelDragOffsetY = 0;
     // Callbacks
     _onSend = null;
     _onFeed = null;
@@ -1791,8 +1797,12 @@
         <input type="text" placeholder="Say something..." maxlength="500" />
         <button class="send-btn">Send</button>
       </div>
+      <div class="petclaw-footer">
+        &copy; <a href="https://github.com/pinkfunstudio" target="_blank">PinkFun Studio</a> &middot; MIT License
+      </div>
     `;
       shadowRoot.appendChild(this.panelEl);
+      this.headerEl = this.panelEl.querySelector(".petclaw-panel-header");
       this.nameEl = this.panelEl.querySelector(".pet-name");
       this.stageEl = this.panelEl.querySelector(".pet-stage");
       this.messagesEl = this.panelEl.querySelector(".petclaw-messages");
@@ -1807,12 +1817,12 @@
       });
       const closeBtn = this.panelEl.querySelector(".close-btn");
       closeBtn.addEventListener("click", () => this.toggle());
-      this.feedBtn = this.panelEl.querySelector('[data-action="feed"]');
-      this.feedBtn.addEventListener("click", () => {
+      const feedBtn = this.panelEl.querySelector('[data-action="feed"]');
+      feedBtn.addEventListener("click", () => {
         if (this._onFeed) this._onFeed();
       });
-      this.statusBtn = this.panelEl.querySelector('[data-action="status"]');
-      this.statusBtn.addEventListener("click", () => {
+      const statusBtn = this.panelEl.querySelector('[data-action="status"]');
+      statusBtn.addEventListener("click", () => {
         if (this._onStatus) this._onStatus();
       });
       this.panelEl.addEventListener("mousedown", (e) => e.stopPropagation());
@@ -1820,22 +1830,84 @@
       this.panelEl.addEventListener("keydown", (e) => e.stopPropagation());
       this.panelEl.addEventListener("keyup", (e) => e.stopPropagation());
       this.panelEl.addEventListener("keypress", (e) => e.stopPropagation());
+      this.headerEl.addEventListener("mousedown", this.handleHeaderMouseDown);
+      this.headerEl.addEventListener("touchstart", this.handleHeaderTouchStart, { passive: false });
+    }
+    // ── Panel drag handlers ─────────────────────────────
+    handleHeaderMouseDown = (e) => {
+      if (e.target.classList.contains("close-btn")) return;
+      e.preventDefault();
+      this.startPanelDrag(e.clientX, e.clientY);
+      window.addEventListener("mousemove", this.handlePanelMouseMove);
+      window.addEventListener("mouseup", this.handlePanelMouseUp);
+    };
+    handlePanelMouseMove = (e) => {
+      this.movePanelDrag(e.clientX, e.clientY);
+    };
+    handlePanelMouseUp = () => {
+      this.endPanelDrag();
+      window.removeEventListener("mousemove", this.handlePanelMouseMove);
+      window.removeEventListener("mouseup", this.handlePanelMouseUp);
+    };
+    handleHeaderTouchStart = (e) => {
+      if (e.target.classList.contains("close-btn")) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      this.startPanelDrag(touch.clientX, touch.clientY);
+      window.addEventListener("touchmove", this.handlePanelTouchMove, { passive: false });
+      window.addEventListener("touchend", this.handlePanelTouchEnd);
+    };
+    handlePanelTouchMove = (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      this.movePanelDrag(touch.clientX, touch.clientY);
+    };
+    handlePanelTouchEnd = () => {
+      this.endPanelDrag();
+      window.removeEventListener("touchmove", this.handlePanelTouchMove);
+      window.removeEventListener("touchend", this.handlePanelTouchEnd);
+    };
+    startPanelDrag(clientX, clientY) {
+      this.panelDragging = true;
+      this.headerEl.classList.add("dragging");
+      const rect = this.panelEl.getBoundingClientRect();
+      this.panelEl.style.bottom = "auto";
+      this.panelEl.style.right = "auto";
+      this.panelEl.style.top = `${rect.top}px`;
+      this.panelEl.style.left = `${rect.left}px`;
+      this.panelDragOffsetX = clientX - rect.left;
+      this.panelDragOffsetY = clientY - rect.top;
+    }
+    movePanelDrag(clientX, clientY) {
+      if (!this.panelDragging) return;
+      const x = Math.max(0, Math.min(window.innerWidth - 320, clientX - this.panelDragOffsetX));
+      const y = Math.max(0, Math.min(window.innerHeight - 100, clientY - this.panelDragOffsetY));
+      this.panelEl.style.left = `${x}px`;
+      this.panelEl.style.top = `${y}px`;
+    }
+    endPanelDrag() {
+      this.panelDragging = false;
+      this.headerEl.classList.remove("dragging");
     }
     // ── Public API ──────────────────────────────────────
-    /** Update all UI text to match current i18n language */
-    updateLanguage() {
-      this.feedBtn.textContent = t("feed");
-      this.statusBtn.textContent = t("status");
-      this.sendBtn.textContent = t("sendBtn");
-      this.inputEl.placeholder = t("inputPlaceholder");
-    }
     /** Update pet info shown in the header */
     updatePetInfo(name, stage) {
       this.petName = name;
       this.petStage = stage;
       this.nameEl.textContent = name;
       const stageLabel = STAGE_NAMES[stage];
-      this.stageEl.textContent = stageLabel ? `${stageLabel.zh} ${stageLabel.en}` : stage;
+      this.stageEl.textContent = stageLabel ? stageLabel.en : stage;
+    }
+    /** Load chat history from stored messages */
+    loadHistory(messages) {
+      this.messagesEl.innerHTML = "";
+      for (const msg of messages) {
+        const msgEl = document.createElement("div");
+        msgEl.className = `petclaw-msg ${msg.role === "pet" ? "pet" : "user"}`;
+        msgEl.textContent = msg.content;
+        this.messagesEl.appendChild(msgEl);
+      }
+      this.scrollToBottom();
     }
     /** Show a speech bubble above the pet */
     showBubble(text) {
@@ -1919,6 +1991,10 @@
         clearTimeout(this.bubbleTimer);
         this.bubbleTimer = null;
       }
+      window.removeEventListener("mousemove", this.handlePanelMouseMove);
+      window.removeEventListener("mouseup", this.handlePanelMouseUp);
+      window.removeEventListener("touchmove", this.handlePanelTouchMove);
+      window.removeEventListener("touchend", this.handlePanelTouchEnd);
     }
     // ── Internal ──────────────────────────────────────────
     handleSend() {
@@ -2071,6 +2147,16 @@
     }
   };
 
+  // src/shared/i18n.ts
+  var _lang = "en";
+  function setLang(lang) {
+    if (lang === "auto") {
+      _lang = typeof navigator !== "undefined" && navigator.language.startsWith("zh") ? "zh" : "en";
+    } else {
+      _lang = lang;
+    }
+  }
+
   // src/content/index.ts
   var ACTIVE_INSTANCE_KEY = "petclawActiveInstance";
   var SHUTDOWN_EVENT = "petclaw:shutdown";
@@ -2093,6 +2179,8 @@
     if (existing) {
       const oldTimerId = existing.dataset.petclawSyncTimer;
       if (oldTimerId) clearInterval(Number(oldTimerId));
+      const oldPosTimerId = existing.dataset.petclawPositionTimer;
+      if (oldPosTimerId) clearInterval(Number(oldPosTimerId));
       existing.dataset.petclawDead = "1";
       existing.remove();
     }
@@ -2102,6 +2190,7 @@
     const instanceId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     document.documentElement.dataset[ACTIVE_INSTANCE_KEY] = instanceId;
     let syncTimer = null;
+    let positionSyncTimer = null;
     let scrollDebounce = null;
     let tornDown = false;
     function isCurrentInstance() {
@@ -2127,10 +2216,15 @@
         clearInterval(syncTimer);
         syncTimer = null;
       }
+      if (positionSyncTimer) {
+        clearInterval(positionSyncTimer);
+        positionSyncTimer = null;
+      }
       clearInterval(platformScanTimer);
       if (scrollDebounce) clearTimeout(scrollDebounce);
       window.removeEventListener("scroll", handleScroll);
       document.removeEventListener(SHUTDOWN_EVENT, handleShutdown);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pagehide", handlePageHide);
       try {
         chrome.runtime.onMessage.removeListener(handleBackgroundMessage);
@@ -2223,6 +2317,40 @@
     function handlePageHide() {
       teardown();
     }
+    function startPositionSync() {
+      if (positionSyncTimer) return;
+      pet.enablePhysics(true);
+      positionSyncTimer = setInterval(async () => {
+        if (!isInstanceAlive()) return;
+        const state = pet.getSyncState();
+        void sendToBackground({
+          type: "SYNC_POSITION",
+          x: state.x,
+          direction: state.direction
+        });
+      }, 1e3);
+    }
+    function stopPositionSync() {
+      if (positionSyncTimer) {
+        clearInterval(positionSyncTimer);
+        positionSyncTimer = null;
+      }
+      pet.enablePhysics(false);
+    }
+    function handleVisibilityChange() {
+      if (!isInstanceAlive()) return;
+      if (document.visibilityState === "visible") {
+        startPositionSync();
+        void sendToBackground({ type: "GET_STATE" }).then((response) => {
+          if (response.ok && response.state) {
+            handleStateUpdate(response.state);
+          }
+        });
+      } else {
+        stopPositionSync();
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     function handleBackgroundMessage(message, _sender, _sendResponse) {
       try {
         if (!isInstanceAlive()) return false;
@@ -2240,6 +2368,11 @@
             chatUI.showBubble(message.text);
             if (chatUI.panelOpen) {
               chatUI.appendMessage("pet", message.text);
+            }
+            break;
+          case "CHAT_UPDATE":
+            for (const msg of message.messages) {
+              chatUI.appendMessage(msg.role === "pet" ? "pet" : "user", msg.content);
             }
             break;
         }
@@ -2260,7 +2393,9 @@
         }
         if (response.ok && response.settings) {
           setLang(response.settings.language);
-          chatUI.updateLanguage();
+        }
+        if (response.ok && response.chatHistory && response.chatHistory.length > 0) {
+          chatUI.loadHistory(response.chatHistory);
         }
       } catch (err) {
         console.error("[PetClaw] Init failed:", err);
@@ -2269,6 +2404,11 @@
     document.addEventListener(SHUTDOWN_EVENT, handleShutdown);
     window.addEventListener("pagehide", handlePageHide);
     init();
+    if (document.visibilityState === "visible") {
+      startPositionSync();
+    } else {
+      pet.enablePhysics(false);
+    }
     try {
       chrome.runtime.onMessage.addListener(handleBackgroundMessage);
     } catch {
@@ -2282,7 +2422,7 @@
     pet.onDoubleClick(() => {
       if (!isInstanceAlive()) return;
       if (!chatUI.panelOpen) chatUI.toggle();
-      chatUI.showBubble(t("whatUp"));
+      chatUI.showBubble("What's up?");
       pet.setAction("happy");
       void sendToBackground({ type: "PET_INTERACTION", action: "doubleclick" });
     });
@@ -2291,23 +2431,23 @@
       if (count === 1) {
         pet.setAction("idle");
       } else if (count === 2) {
-        chatUI.showBubble(t("petMe"));
+        chatUI.showBubble("Pet me more!");
         pet.setAction("happy");
       } else if (count >= 5) {
-        chatUI.showBubble(t("stopIt"));
+        chatUI.showBubble("Stop it!");
         pet.setAction("sad");
       } else if (count >= 3) {
-        chatUI.showBubble(t("ouch"));
+        chatUI.showBubble("Ouch!");
       }
       void sendToBackground({ type: "PET_INTERACTION", action: "poke" });
     });
     pet.onDragStartCallback(() => {
       if (!isInstanceAlive()) return;
-      chatUI.showBubble(t("whee"));
+      chatUI.showBubble("Whee~!");
     });
     pet.onDrop(() => {
       if (!isInstanceAlive()) return;
-      chatUI.showBubble(t("dizzy"));
+      chatUI.showBubble("So dizzy...");
       void sendToBackground({ type: "PET_INTERACTION", action: "drop" });
     });
     chatUI.onSend(async (text) => {
@@ -2316,12 +2456,12 @@
         chatUI.startStreamingMessage();
         const response = await sendToBackground({ type: "CHAT", text });
         if (!response.ok) {
-          chatUI.finishStreaming(response.error || t("connectionFailed"));
+          chatUI.finishStreaming(response.error || "Connection failed");
         }
       } catch (err) {
         console.error("[PetClaw] Chat failed:", err);
         try {
-          chatUI.finishStreaming(t("connectionFailed"));
+          chatUI.finishStreaming("Connection failed");
         } catch {
         }
         teardown();
@@ -2334,7 +2474,7 @@
         if (response.ok && response.state) {
           handleStateUpdate(response.state);
           pet.setAction("eat");
-          chatUI.showBubble(t("yummy"));
+          chatUI.showBubble("Yummy!");
         }
       } catch (err) {
         teardown();
@@ -2349,9 +2489,9 @@
           const s = response.state;
           const statusText = [
             `\u{1F99E} ${s.name}`,
-            `${t("labelStage")}: ${s.stage} | ${t("labelXP")}: ${s.experience}`,
-            `${t("labelHunger")}: ${s.hunger} | ${t("labelMood")}: ${s.happiness} | ${t("labelEnergy")}: ${s.energy}`,
-            `${t("labelDays")}: ${s.daysActive}`
+            `Stage: ${s.stage} | XP: ${s.experience}`,
+            `Hunger: ${s.hunger} | Mood: ${s.happiness} | Energy: ${s.energy}`,
+            `Days: ${s.daysActive}`
           ].join("\n");
           chatUI.appendMessage("pet", statusText);
         }
@@ -2375,6 +2515,9 @@
     }, 3e4);
     if (syncTimer != null) {
       container.dataset.petclawSyncTimer = String(syncTimer);
+    }
+    if (positionSyncTimer != null) {
+      container.dataset.petclawPositionTimer = String(positionSyncTimer);
     }
   }
 })();

@@ -118,15 +118,18 @@ export type MessageToBackground =
   | { type: 'INIT' }
   | { type: 'SAVE_SETTINGS'; settings: Partial<Settings> }
   | { type: 'GET_SETTINGS' }
+  | { type: 'SYNC_POSITION'; x: number; direction: 1 | -1 }
+  | { type: 'GET_CHAT_HISTORY' }
 
 export type MessageToContent =
   | { type: 'STATE_UPDATE'; state: PetState }
   | { type: 'LLM_CHUNK'; text: string }
   | { type: 'LLM_DONE'; fullText: string }
   | { type: 'PET_SPEAK'; text: string }
+  | { type: 'CHAT_UPDATE'; messages: ChatMessage[] }
 
 export type BackgroundResponse =
-  | { ok: true; state?: PetState; settings?: Settings; exportData?: ExportData }
+  | { ok: true; state?: PetState; settings?: Settings; exportData?: ExportData; chatHistory?: ChatMessage[] }
   | { ok: false; error: string }
 
 // ── Settings ───────────────────────────────────────────

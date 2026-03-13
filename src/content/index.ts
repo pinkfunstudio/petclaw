@@ -4,6 +4,12 @@
  * Creates the pet container with Shadow DOM isolation, instantiates the
  * Pet renderer and ChatUI, and wires up all message passing with the
  * background service worker.
+ *
+ * Cross-tab sync:
+ * - Only the visible (active) tab runs pet physics
+ * - Active tab pushes position to background every 1s
+ * - Background broadcasts state to all tabs
+ * - Chat history is shared across all tabs
  */
 
 import type {
@@ -16,15 +22,12 @@ import type {
 import { Pet } from './pet'
 import { ChatUI } from './chat'
 import { ElementScanner } from './elements'
-import { setLang, t } from '../shared/i18n'
+import { setLang } from '../shared/i18n'
 
 const ACTIVE_INSTANCE_KEY = 'petclawActiveInstance'
 const SHUTDOWN_EVENT = 'petclaw:shutdown'
 
 // ── Suppress errors from old orphaned content scripts ──────
-// After extension reload, old scripts keep running with a dead
-// chrome.runtime.  These handlers catch errors from both old and
-// new contexts.
 window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
   const msg = e.reason?.message || String(e.reason || '')
   if (msg.includes('Extension context invalidated')) {
@@ -44,9 +47,10 @@ window.addEventListener('error', (e: ErrorEvent) => {
   }))
   const existing = document.getElementById('petclaw-container')
   if (existing) {
-    // Clear old sync timer before removing
     const oldTimerId = existing.dataset.petclawSyncTimer
     if (oldTimerId) clearInterval(Number(oldTimerId))
+    const oldPosTimerId = existing.dataset.petclawPositionTimer
+    if (oldPosTimerId) clearInterval(Number(oldPosTimerId))
     existing.dataset.petclawDead = '1'
     existing.remove()
   }
@@ -58,6 +62,7 @@ function initPetClaw() {
   document.documentElement.dataset[ACTIVE_INSTANCE_KEY] = instanceId
 
   let syncTimer: ReturnType<typeof setInterval> | null = null
+  let positionSyncTimer: ReturnType<typeof setInterval> | null = null
   let scrollDebounce: ReturnType<typeof setTimeout> | null = null
   let tornDown = false
 
@@ -90,10 +95,15 @@ function initPetClaw() {
       clearInterval(syncTimer)
       syncTimer = null
     }
+    if (positionSyncTimer) {
+      clearInterval(positionSyncTimer)
+      positionSyncTimer = null
+    }
     clearInterval(platformScanTimer)
     if (scrollDebounce) clearTimeout(scrollDebounce)
     window.removeEventListener('scroll', handleScroll)
     document.removeEventListener(SHUTDOWN_EVENT, handleShutdown as EventListener)
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
     window.removeEventListener('pagehide', handlePageHide)
     try {
       chrome.runtime.onMessage.removeListener(handleBackgroundMessage)
@@ -199,6 +209,48 @@ function initPetClaw() {
     teardown()
   }
 
+  // ── Cross-tab position sync ───────────────────────────
+
+  function startPositionSync(): void {
+    if (positionSyncTimer) return
+    pet.enablePhysics(true)
+    positionSyncTimer = setInterval(async () => {
+      if (!isInstanceAlive()) return
+      const state = pet.getSyncState()
+      void sendToBackground({
+        type: 'SYNC_POSITION',
+        x: state.x,
+        direction: state.direction,
+      })
+    }, 1000) // sync position every 1s
+  }
+
+  function stopPositionSync(): void {
+    if (positionSyncTimer) {
+      clearInterval(positionSyncTimer)
+      positionSyncTimer = null
+    }
+    pet.enablePhysics(false)
+  }
+
+  function handleVisibilityChange(): void {
+    if (!isInstanceAlive()) return
+    if (document.visibilityState === 'visible') {
+      // Becoming active: fetch fresh state and start physics
+      startPositionSync()
+      void sendToBackground({ type: 'GET_STATE' }).then(response => {
+        if (response.ok && response.state) {
+          handleStateUpdate(response.state)
+        }
+      })
+    } else {
+      // Going hidden: stop physics, let other tabs take over
+      stopPositionSync()
+    }
+  }
+
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+
   // ── Listen for messages from background ───────────────
 
   function handleBackgroundMessage(
@@ -227,6 +279,13 @@ function initPetClaw() {
             chatUI.appendMessage('pet', message.text)
           }
           break
+
+        case 'CHAT_UPDATE':
+          // New messages from another tab
+          for (const msg of message.messages) {
+            chatUI.appendMessage(msg.role === 'pet' ? 'pet' : 'user', msg.content)
+          }
+          break
       }
     } catch (err: any) {
       if (err?.message?.includes('Extension context invalidated')) {
@@ -248,7 +307,10 @@ function initPetClaw() {
       }
       if (response.ok && response.settings) {
         setLang(response.settings.language)
-        chatUI.updateLanguage()
+      }
+      // Load chat history from storage
+      if (response.ok && response.chatHistory && response.chatHistory.length > 0) {
+        chatUI.loadHistory(response.chatHistory)
       }
     } catch (err) {
       console.error('[PetClaw] Init failed:', err)
@@ -258,6 +320,13 @@ function initPetClaw() {
   document.addEventListener(SHUTDOWN_EVENT, handleShutdown as EventListener)
   window.addEventListener('pagehide', handlePageHide)
   init()
+
+  // Start physics if tab is currently visible
+  if (document.visibilityState === 'visible') {
+    startPositionSync()
+  } else {
+    pet.enablePhysics(false)
+  }
 
   try {
     chrome.runtime.onMessage.addListener(handleBackgroundMessage)
@@ -278,7 +347,7 @@ function initPetClaw() {
   pet.onDoubleClick(() => {
     if (!isInstanceAlive()) return
     if (!chatUI.panelOpen) chatUI.toggle()
-    chatUI.showBubble(t('whatUp'))
+    chatUI.showBubble('What\'s up?')
     pet.setAction('happy')
     void sendToBackground({ type: 'PET_INTERACTION', action: 'doubleclick' })
   })
@@ -288,19 +357,15 @@ function initPetClaw() {
   pet.onPoke((count: number) => {
     if (!isInstanceAlive()) return
     if (count === 1) {
-      // First poke — curious
       pet.setAction('idle')
     } else if (count === 2) {
-      // Second poke — playful
-      chatUI.showBubble(t('petMe'))
+      chatUI.showBubble('Pet me more!')
       pet.setAction('happy')
     } else if (count >= 5) {
-      // Too many pokes — annoyed
-      chatUI.showBubble(t('stopIt'))
+      chatUI.showBubble('Stop it!')
       pet.setAction('sad')
     } else if (count >= 3) {
-      // 3-4 pokes — ouch
-      chatUI.showBubble(t('ouch'))
+      chatUI.showBubble('Ouch!')
     }
     void sendToBackground({ type: 'PET_INTERACTION', action: 'poke' })
   })
@@ -309,14 +374,14 @@ function initPetClaw() {
 
   pet.onDragStartCallback(() => {
     if (!isInstanceAlive()) return
-    chatUI.showBubble(t('whee'))
+    chatUI.showBubble('Whee~!')
   })
 
   // ── Pet dropped → dizzy reaction ────────────────────
 
   pet.onDrop(() => {
     if (!isInstanceAlive()) return
-    chatUI.showBubble(t('dizzy'))
+    chatUI.showBubble('So dizzy...')
     void sendToBackground({ type: 'PET_INTERACTION', action: 'drop' })
   })
 
@@ -328,11 +393,11 @@ function initPetClaw() {
       chatUI.startStreamingMessage()
       const response = await sendToBackground({ type: 'CHAT', text })
       if (!response.ok) {
-        chatUI.finishStreaming(response.error || t('connectionFailed'))
+        chatUI.finishStreaming(response.error || 'Connection failed')
       }
     } catch (err) {
       console.error('[PetClaw] Chat failed:', err)
-      try { chatUI.finishStreaming(t('connectionFailed')) } catch { /* */ }
+      try { chatUI.finishStreaming('Connection failed') } catch { /* */ }
       teardown()
     }
   })
@@ -346,7 +411,7 @@ function initPetClaw() {
       if (response.ok && response.state) {
         handleStateUpdate(response.state)
         pet.setAction('eat')
-        chatUI.showBubble(t('yummy'))
+        chatUI.showBubble('Yummy!')
       }
     } catch (err) {
       teardown()
@@ -364,9 +429,9 @@ function initPetClaw() {
         const s = response.state
         const statusText = [
           `🦞 ${s.name}`,
-          `${t('labelStage')}: ${s.stage} | ${t('labelXP')}: ${s.experience}`,
-          `${t('labelHunger')}: ${s.hunger} | ${t('labelMood')}: ${s.happiness} | ${t('labelEnergy')}: ${s.energy}`,
-          `${t('labelDays')}: ${s.daysActive}`,
+          `Stage: ${s.stage} | XP: ${s.experience}`,
+          `Hunger: ${s.hunger} | Mood: ${s.happiness} | Energy: ${s.energy}`,
+          `Days: ${s.daysActive}`,
         ].join('\n')
         chatUI.appendMessage('pet', statusText)
       }
@@ -393,9 +458,11 @@ function initPetClaw() {
     }
   }, 30_000)
 
-  // Store sync timer ID on the container so the cleanup script
-  // (injected on extension reload) can find and clear it.
+  // Store timer IDs on the container so the cleanup script can find them
   if (syncTimer != null) {
     container.dataset.petclawSyncTimer = String(syncTimer)
+  }
+  if (positionSyncTimer != null) {
+    container.dataset.petclawPositionTimer = String(positionSyncTimer)
   }
 }

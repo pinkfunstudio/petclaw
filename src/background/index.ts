@@ -261,12 +261,12 @@ function calcDaysActive(birthday: number): number {
 
 // ── Broadcast state to all tabs ─────────────────────────
 
-async function broadcastState(state: PetState): Promise<void> {
+async function broadcastState(state: PetState, excludeTabId?: number): Promise<void> {
   try {
     const tabs = await chrome.tabs.query({})
     const message: MessageToContent = { type: 'STATE_UPDATE', state }
     for (const tab of tabs) {
-      if (tab.id != null) {
+      if (tab.id != null && tab.id !== excludeTabId) {
         chrome.tabs.sendMessage(tab.id, message).catch(() => {
           // Tab might not have content script, ignore
         })
@@ -274,6 +274,20 @@ async function broadcastState(state: PetState): Promise<void> {
     }
   } catch {
     // Tabs API might fail in some contexts, ignore
+  }
+}
+
+async function broadcastChat(messages: ChatMessage[], excludeTabId?: number): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({})
+    const message: MessageToContent = { type: 'CHAT_UPDATE', messages }
+    for (const tab of tabs) {
+      if (tab.id != null && tab.id !== excludeTabId) {
+        chrome.tabs.sendMessage(tab.id, message).catch(() => {})
+      }
+    }
+  } catch {
+    // ignore
   }
 }
 
@@ -315,9 +329,10 @@ async function handleMessage(
         state = createDefaultPetState(settings.petName)
         await savePetState(state)
       }
+      const chatHistory = await getChatHistory()
       // Ensure decay alarm is running
       await setupDecayAlarm()
-      return { ok: true, state, settings }
+      return { ok: true, state, settings, chatHistory }
     }
 
     // ── GET_STATE ─────────────────────────────────────
@@ -437,6 +452,11 @@ async function handleMessage(
       // 12. Auto-regenerate export files
       scheduleExportRegen()
 
+      // 13. Broadcast state + chat to all other tabs
+      const senderTabId = sender.tab?.id
+      await broadcastState(state, senderTabId)
+      await broadcastChat([userMsg, petMsg], senderTabId)
+
       return { ok: true, state }
     }
 
@@ -463,6 +483,7 @@ async function handleMessage(
       ])
 
       scheduleExportRegen()
+      await broadcastState(state, sender.tab?.id)
       return { ok: true, state }
     }
 
@@ -480,7 +501,24 @@ async function handleMessage(
 
       await savePetState(state)
       scheduleExportRegen()
+      await broadcastState(state, sender.tab?.id)
       return { ok: true, state }
+    }
+
+    // ── SYNC_POSITION ─────────────────────────────────
+    case 'SYNC_POSITION': {
+      let state = await getPetState()
+      if (!state) return { ok: false, error: 'No pet state found' }
+      state = { ...state, x: msg.x, direction: msg.direction }
+      await savePetState(state)
+      await broadcastState(state, sender.tab?.id)
+      return { ok: true }
+    }
+
+    // ── GET_CHAT_HISTORY ──────────────────────────────
+    case 'GET_CHAT_HISTORY': {
+      const chatHistory = await getChatHistory()
+      return { ok: true, chatHistory }
     }
 
     // ── EXPORT ────────────────────────────────────────

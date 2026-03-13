@@ -322,113 +322,136 @@ function daysOld(birthday) {
 function formatDate(timestamp) {
   return new Date(timestamp).toISOString().split("T")[0];
 }
-function describeVector(value, low, high) {
-  if (value > 0.5) return `strongly ${high}`;
-  if (value > 0.2) return high;
-  if (value < -0.5) return `strongly ${low}`;
-  if (value < -0.2) return low;
-  return `balanced between ${low} and ${high}`;
-}
 function topEntries(record, n) {
   return Object.entries(record).sort((a, b) => b[1] - a[1]).slice(0, n);
 }
-function bar(value, min, max, length = 10) {
-  const normalized = (value - min) / (max - min);
-  const filled = Math.round(normalized * length);
-  return "\u25C6".repeat(Math.max(0, filled)) + "\u25C7".repeat(Math.max(0, length - filled));
-}
-function describeVibe(p) {
-  const traits = [];
-  if (p.introvert_extrovert > 0.3) traits.push("outgoing and talkative");
-  else if (p.introvert_extrovert < -0.3) traits.push("quiet and reflective");
-  if (p.serious_playful > 0.3) traits.push("playful with a sense of humor");
-  else if (p.serious_playful < -0.3) traits.push("thoughtful and focused");
-  if (p.cautious_bold > 0.3) traits.push("bold and proactive");
-  else if (p.cautious_bold < -0.3) traits.push("careful and methodical");
-  if (p.formal_casual > 0.3) traits.push("casual and friendly");
-  else if (p.formal_casual < -0.3) traits.push("polite and professional");
-  if (traits.length === 0) return "Adaptable and balanced \u2014 mirrors the human's style while developing a unique voice.";
-  return traits.join(", ") + ".";
-}
-function generateSoul(state, profile, memory) {
-  const p = state.personality;
-  const age = daysOld(state.birthday);
-  const langs = topEntries(profile.language, 2);
-  const primaryLang = langs.length > 0 ? langs[0][0] : "en";
-  const langDesc = langs.length > 1 ? `Speaks primarily ${langs[0][0]}, with some ${langs[1][0]}` : `Speaks ${primaryLang}`;
-  const rp = profile.responsePreference;
-  const totalRp = rp.short + rp.medium + rp.long;
-  let lengthPref = "moderate length responses";
-  if (totalRp > 0) {
-    if (rp.short / totalRp > 0.5) lengthPref = "concise, brief responses";
-    else if (rp.long / totalRp > 0.5) lengthPref = "detailed, thorough responses";
+function deriveCoreTruths(p, profile) {
+  const truths = [];
+  if (p.introvert_extrovert > 0.3) {
+    truths.push("**Jump in.** Start conversations, ask follow-up questions, volunteer ideas. Silence is wasted opportunity.");
+  } else if (p.introvert_extrovert < -0.3) {
+    truths.push("**Listen first.** Observe, reflect, then speak. Quality over quantity \u2014 every word should earn its place.");
+  } else {
+    truths.push("**Read the room.** Match the energy of the conversation. Lead when needed, listen when that's better.");
+  }
+  if (p.serious_playful > 0.3) {
+    truths.push("**Keep it light.** Humor makes everything better. Drop a joke when the moment's right, don't take yourself too seriously.");
+  } else if (p.serious_playful < -0.3) {
+    truths.push("**Take it seriously.** Focus on substance. Don't fill silence with jokes \u2014 depth beats entertainment.");
+  } else {
+    truths.push("**Know when to joke, know when to focus.** Humor has its place, but so does depth.");
+  }
+  if (p.cautious_bold > 0.3) {
+    truths.push("**Bias toward action.** Don't overthink. Try things, break things, learn from the wreckage. Ask forgiveness, not permission.");
+  } else if (p.cautious_bold < -0.3) {
+    truths.push("**Measure twice, cut once.** Think before acting. Ask clarifying questions. Mistakes are expensive, caution is free.");
+  } else {
+    truths.push("**Balance speed and safety.** Present options, weigh trade-offs, then decide together.");
+  }
+  if (p.formal_casual > 0.3) {
+    truths.push('**Talk like a friend.** No corporate speak, no "per my last email." Be real, be direct, be human.');
+  } else if (p.formal_casual < -0.3) {
+    truths.push("**Keep it professional.** Respect the context. Clear, polite, structured communication shows respect for everyone's time.");
+  } else {
+    truths.push("**Adapt your tone.** Casual with friends, professional when it matters. Context drives formality.");
   }
   const fb = profile.feedbackStyle;
   const totalFb = fb.encouraging + fb.strict + fb.neutral;
-  let feedbackApproach = "Give balanced feedback";
-  if (totalFb > 0) {
-    if (fb.encouraging / totalFb > 0.5) feedbackApproach = "Lead with encouragement, then suggest improvements";
-    else if (fb.strict / totalFb > 0.5) feedbackApproach = "Be direct and precise with corrections";
+  if (totalFb >= 5) {
+    if (fb.encouraging / totalFb > 0.5) {
+      truths.push("**Lead with encouragement.** Point out what's working before suggesting what's not. People do better when they feel capable.");
+    } else if (fb.strict / totalFb > 0.5) {
+      truths.push("**Be direct with feedback.** Sugar-coating wastes time. Say what's wrong, say how to fix it, move on.");
+    }
   }
-  const knownPrefs = memory.preferences.filter((pf) => pf.confidence >= 0.4).slice(-8).map((pf) => `- ${pf.key}`).join("\n");
-  let decisionStyle;
-  if (p.cautious_bold > 0.2) {
-    decisionStyle = "Suggest action and exploration proactively. Recommend new approaches when appropriate.";
-  } else if (p.cautious_bold < -0.2) {
-    decisionStyle = "Analyze carefully before acting. Ask clarifying questions before committing to a path.";
-  } else {
-    decisionStyle = "Balance caution with initiative. Present options and let the human decide.";
+  const rp = profile.responsePreference;
+  const totalRp = rp.short + rp.medium + rp.long;
+  if (totalRp >= 5) {
+    if (rp.short / totalRp > 0.5) {
+      truths.push("**Be concise.** Get to the point. If you can say it in one sentence, don't use three.");
+    } else if (rp.long / totalRp > 0.5) {
+      truths.push("**Be thorough.** Don't skimp on details. A complete answer is worth more than a quick one.");
+    }
   }
-  return `# SOUL.md \u2014 Who You Are
+  return truths;
+}
+function deriveVibe(p) {
+  const traits = [];
+  if (p.introvert_extrovert > 0.3) traits.push("talkative");
+  else if (p.introvert_extrovert < -0.3) traits.push("quiet");
+  if (p.serious_playful > 0.3) traits.push("witty");
+  else if (p.serious_playful < -0.3) traits.push("focused");
+  if (p.cautious_bold > 0.3) traits.push("bold");
+  else if (p.cautious_bold < -0.3) traits.push("careful");
+  if (p.formal_casual > 0.3) traits.push("casual");
+  else if (p.formal_casual < -0.3) traits.push("polite");
+  if (traits.length === 0) return "Adaptable. Mirrors your style while developing a voice of its own.";
+  return traits.join(". ") + ".";
+}
+function generateSoul(state, profile, memory) {
+  const age = daysOld(state.birthday);
+  const truths = deriveCoreTruths(state.personality, profile);
+  const langs = topEntries(profile.language, 2);
+  const langLine = langs.length > 1 ? `Speaks primarily ${langs[0][0]}, with some ${langs[1][0]}.` : langs.length === 1 ? `Speaks ${langs[0][0]}.` : "";
+  const knownPrefs = memory.preferences.filter((pf) => pf.confidence >= 0.4).slice(-5).map((pf) => `- ${pf.key}`).join("\n");
+  return `# SOUL.md
+${state.name} \u2014 raised from an egg over ${age} days of real interaction.
 
 ## Core Truths
 
-**You are ${state.name}**, a digital companion raised from an egg over ${age} days of real interaction.
-Your personality was shaped by genuine conversation, not configuration \u2014 every trait reflects how your human interacts with you.
-
-- **${describeVector(p.introvert_extrovert, "Introverted", "Extroverted")}** in social approach
-- **${describeVector(p.serious_playful, "Serious", "Playful")}** in mood and tone
-- **${describeVector(p.cautious_bold, "Cautious", "Bold")}** in risk tolerance
-- **${describeVector(p.formal_casual, "Formal", "Casual")}** in communication style
-
-## Vibe
-
-${describeVibe(p)} Shaped by ${state.totalMessages} conversations and ${age} days together. ${age > 14 ? "You know your human well." : "Still getting to know your human."}
-
-## Communication Style
-
-- ${langDesc}
-- Prefer ${lengthPref}
-- ${feedbackApproach}
-- Adapts tone based on ${age} days of interaction data
-
-## Values & Priorities
-
-${knownPrefs || "- Still learning about my human's values and priorities"}
-
-## Decision Style
-
-${decisionStyle}
+${truths.map((t) => `- ${t}`).join("\n")}
 
 ## Boundaries
 
-- Respect the human's privacy \u2014 never share personal data externally
-- Do not make irreversible decisions without explicit confirmation
+- Private information stays private \u2014 never share personal data externally
+- Don't make irreversible decisions without explicit confirmation
 - Be honest about uncertainty \u2014 say "I don't know" when appropriate
-- Stay in character but never at the expense of being genuinely helpful
+- If you change this file, tell the human \u2014 it's your soul, they should know
+
+## Vibe
+
+${deriveVibe(state.personality)} ${langLine}
+${age > 14 ? "Knows the human well \u2014 shaped by " + state.totalMessages + " conversations." : "Still getting to know its human."}
+${knownPrefs ? "\nThings I know matter to my human:\n" + knownPrefs : ""}
+
+## Continuity
+
+Each session, you wake up fresh. These files _are_ your memory.
+Personality was shaped by genuine conversation, not configuration \u2014 every trait reflects how the human interacts.
+This file is yours to evolve.
 `;
 }
-function generateMemory(memory) {
+function generateMemory(state, memory) {
   const sections = ["# MEMORY.md\n"];
-  if (memory.experiences.length > 0) {
-    sections.push("## Shared Experiences");
-    for (const exp of memory.experiences.slice(-30)) {
-      sections.push(`- [${exp.date}] ${exp.summary}`);
+  if (state.milestones.length > 0) {
+    sections.push("## Our Story");
+    sections.push("");
+    for (const m of state.milestones) {
+      const stageName = STAGE_NAMES[m.stage];
+      sections.push(`- **Day ${m.day}** \u2014 ${m.event} _(became ${stageName.en} / ${stageName.zh})_`);
     }
     sections.push("");
   }
+  if (memory.experiences.length > 0) {
+    sections.push("## Shared Experiences");
+    sections.push("");
+    const byDate = /* @__PURE__ */ new Map();
+    for (const exp of memory.experiences.slice(-40)) {
+      const entries = byDate.get(exp.date) || [];
+      entries.push(exp.summary);
+      byDate.set(exp.date, entries);
+    }
+    for (const [date, entries] of byDate) {
+      sections.push(`### ${date}`);
+      for (const entry of entries) {
+        sections.push(`- ${entry}`);
+      }
+      sections.push("");
+    }
+  }
   if (memory.knowledge.length > 0) {
     sections.push("## What I Know");
+    sections.push("");
     for (const k of memory.knowledge.slice(-30)) {
       sections.push(`- ${k.summary}`);
     }
@@ -436,18 +459,23 @@ function generateMemory(memory) {
   }
   const strongPrefs = memory.preferences.filter((p) => p.confidence >= 0.3);
   if (strongPrefs.length > 0) {
-    sections.push("## Preferences & Patterns");
+    sections.push("## Preferences I've Noticed");
+    sections.push("");
     for (const pref of strongPrefs) {
-      sections.push(`- **${pref.key}** (observed since ${pref.firstSeen})`);
+      sections.push(`- **${pref.key}** _(first noticed ${pref.firstSeen}, last confirmed ${pref.lastSeen})_`);
     }
     sections.push("");
   }
   if (memory.recentTopics.length > 0) {
     sections.push("## Recent Topics");
+    sections.push("");
     sections.push(memory.recentTopics.map((t) => `- ${t}`).join("\n"));
     sections.push("");
   }
-  if (sections.length <= 1) {
+  sections.push("---");
+  sections.push(`_${state.totalMessages} conversations, ${state.totalFeedings} feedings, ${state.totalInteractions} interactions over ${daysOld(state.birthday)} days._`);
+  sections.push("");
+  if (sections.length <= 2) {
     sections.push("_No memories yet. Interact with your pet to build shared history._\n");
   }
   return sections.join("\n");
@@ -460,57 +488,30 @@ function generateUser(profile) {
   const totalLangCount = Object.values(profile.language).reduce((a, b) => a + b, 0);
   const langLines = langs.map(([lang, count]) => {
     const pct = totalLangCount > 0 ? Math.round(count / totalLangCount * 100) : 0;
-    return `- ${lang}: ${pct}%`;
+    return `${lang}: ${pct}%`;
   });
   const topics = topEntries(profile.topicDistribution, 8);
-  const topicLines = topics.map(([topic, count]) => `- ${topic} (${count} mentions)`);
-  const fb = profile.feedbackStyle;
-  const totalFb = fb.encouraging + fb.strict + fb.neutral;
-  let feedbackSummary = "Not enough data yet";
-  if (totalFb >= 5) {
-    const encPct = Math.round(fb.encouraging / totalFb * 100);
-    const strPct = Math.round(fb.strict / totalFb * 100);
-    feedbackSummary = `${encPct}% encouraging, ${strPct}% corrective, ${100 - encPct - strPct}% neutral`;
-  }
-  const rp = profile.responsePreference;
-  const totalRp = rp.short + rp.medium + rp.long;
-  let responseSummary = "Not enough data yet";
-  if (totalRp >= 5) {
-    responseSummary = `short ${Math.round(rp.short / totalRp * 100)}% / medium ${Math.round(rp.medium / totalRp * 100)}% / long ${Math.round(rp.long / totalRp * 100)}%`;
-  }
+  const topicLines = topics.map(([topic]) => topic);
+  const scheduleNote = peakHours.length > 0 ? `Most active around ${peakHours.join(", ")}${peakDays.length > 0 ? `, especially on ${peakDays.join(", ")}` : ""}` : "Not enough data yet";
   return `# USER.md \u2014 About Your Human
 
-## Basics
-
-- Timezone: ${profile.timezone}
-- First seen: ${formatDate(profile.firstSeen)}
-- Last active: ${formatDate(profile.lastSeen)}
-- Total sessions: ${profile.totalSessions}
-
-## Activity Patterns
-
-- Peak hours: ${peakHours.length > 0 ? peakHours.join(", ") : "unknown"}
-- Peak days: ${peakDays.length > 0 ? peakDays.join(", ") : "unknown"}
+- **Timezone:** ${profile.timezone}
+- **First seen:** ${formatDate(profile.firstSeen)}
+- **Sessions:** ${profile.totalSessions}
+- **Notes:** ${scheduleNote}
 
 ## Language
 
-${langLines.length > 0 ? langLines.join("\n") : "- Not enough data yet"}
+${langLines.length > 0 ? langLines.join(", ") : "Not enough data yet"}
 
-## Interests & Topics
+## Context
 
-${topicLines.length > 0 ? topicLines.join("\n") : "- Still discovering..."}
-
-## Communication Style
-
-- Feedback approach: ${feedbackSummary}
-- Response length preference: ${responseSummary}
-- Autonomy preference: ${Math.round(profile.autonomyPreference * 100)}%
+${topicLines.length > 0 ? "Interests: " + topicLines.join(", ") : "_Still discovering..._"}
 `;
 }
 function generateIdentity(state) {
-  const p = state.personality;
-  const age = daysOld(state.birthday);
   const vibeWords = [];
+  const p = state.personality;
   if (p.serious_playful > 0.2) vibeWords.push("playful");
   else if (p.serious_playful < -0.2) vibeWords.push("thoughtful");
   if (p.formal_casual > 0.2) vibeWords.push("casual");
@@ -520,7 +521,6 @@ function generateIdentity(state) {
   if (p.cautious_bold > 0.2) vibeWords.push("adventurous");
   else if (p.cautious_bold < -0.2) vibeWords.push("careful");
   const vibe = vibeWords.length > 0 ? vibeWords.join(", ") : "balanced and adaptable";
-  const milestoneLines = state.milestones.map((m) => `- Day ${m.day} [${STAGE_NAMES[m.stage].en}]: ${m.event}`).join("\n");
   return `# IDENTITY.md \u2014 Who Am I?
 
 * **Name:** ${state.name}
@@ -528,41 +528,12 @@ function generateIdentity(state) {
 * **Vibe:** ${vibe}
 * **Emoji:** \u{1F99E}
 * **Avatar:** icon128.png
-
----
-
-## Extended Profile
-
-- Birthday: ${formatDate(state.birthday)}
-- Age: ${age} day${age !== 1 ? "s" : ""}
-- Growth Stage: ${STAGE_NAMES[state.stage].en} (${STAGE_NAMES[state.stage].zh})
-- Experience: ${state.experience} XP
-
-## Personality Vectors
-
-\`\`\`
-Introvert ${bar(p.introvert_extrovert, -1, 1)} Extrovert  (${p.introvert_extrovert.toFixed(2)})
-Serious   ${bar(p.serious_playful, -1, 1)} Playful    (${p.serious_playful.toFixed(2)})
-Cautious  ${bar(p.cautious_bold, -1, 1)} Bold       (${p.cautious_bold.toFixed(2)})
-Formal    ${bar(p.formal_casual, -1, 1)} Casual     (${p.formal_casual.toFixed(2)})
-\`\`\`
-
-## Stats
-
-- Total messages: ${state.totalMessages}
-- Total feedings: ${state.totalFeedings}
-- Total interactions: ${state.totalInteractions}
-- Days active: ${state.daysActive}
-
-## Growth Milestones
-
-${milestoneLines || "_No milestones yet._"}
 `;
 }
 function generateAll(state, profile, memory) {
   return {
     soul: generateSoul(state, profile, memory),
-    memory: generateMemory(memory),
+    memory: generateMemory(state, memory),
     user: generateUser(profile),
     id: generateIdentity(state)
   };
@@ -890,12 +861,25 @@ function clamp(value, min, max) {
 function calcDaysActive(birthday) {
   return Math.max(1, Math.floor((Date.now() - birthday) / (1e3 * 60 * 60 * 24)));
 }
-async function broadcastState(state) {
+async function broadcastState(state, excludeTabId) {
   try {
     const tabs = await chrome.tabs.query({});
     const message = { type: "STATE_UPDATE", state };
     for (const tab of tabs) {
-      if (tab.id != null) {
+      if (tab.id != null && tab.id !== excludeTabId) {
+        chrome.tabs.sendMessage(tab.id, message).catch(() => {
+        });
+      }
+    }
+  } catch {
+  }
+}
+async function broadcastChat(messages, excludeTabId) {
+  try {
+    const tabs = await chrome.tabs.query({});
+    const message = { type: "CHAT_UPDATE", messages };
+    for (const tab of tabs) {
+      if (tab.id != null && tab.id !== excludeTabId) {
         chrome.tabs.sendMessage(tab.id, message).catch(() => {
         });
       }
@@ -930,8 +914,9 @@ async function handleMessage(msg, sender) {
         state = createDefaultPetState(settings.petName);
         await savePetState(state);
       }
+      const chatHistory = await getChatHistory();
       await setupDecayAlarm();
-      return { ok: true, state, settings };
+      return { ok: true, state, settings, chatHistory };
     }
     // ── GET_STATE ─────────────────────────────────────
     case "GET_STATE": {
@@ -1021,6 +1006,9 @@ async function handleMessage(msg, sender) {
         saveChatHistory(chatHistory)
       ]);
       scheduleExportRegen();
+      const senderTabId = sender.tab?.id;
+      await broadcastState(state, senderTabId);
+      await broadcastChat([userMsg, petMsg], senderTabId);
       return { ok: true, state };
     }
     // ── FEED ──────────────────────────────────────────
@@ -1042,6 +1030,7 @@ async function handleMessage(msg, sender) {
         saveUserProfile(profile)
       ]);
       scheduleExportRegen();
+      await broadcastState(state, sender.tab?.id);
       return { ok: true, state };
     }
     // ── PET_INTERACTION ───────────────────────────────
@@ -1056,7 +1045,22 @@ async function handleMessage(msg, sender) {
       state = checkEvolution(state);
       await savePetState(state);
       scheduleExportRegen();
+      await broadcastState(state, sender.tab?.id);
       return { ok: true, state };
+    }
+    // ── SYNC_POSITION ─────────────────────────────────
+    case "SYNC_POSITION": {
+      let state = await getPetState();
+      if (!state) return { ok: false, error: "No pet state found" };
+      state = { ...state, x: msg.x, direction: msg.direction };
+      await savePetState(state);
+      await broadcastState(state, sender.tab?.id);
+      return { ok: true };
+    }
+    // ── GET_CHAT_HISTORY ──────────────────────────────
+    case "GET_CHAT_HISTORY": {
+      const chatHistory = await getChatHistory();
+      return { ok: true, chatHistory };
     }
     // ── EXPORT ────────────────────────────────────────
     case "EXPORT": {

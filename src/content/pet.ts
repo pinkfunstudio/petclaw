@@ -92,6 +92,9 @@ export class Pet {
   // Bounce state
   private bouncing = false
 
+  // Cross-tab sync: only the active (visible) tab runs physics
+  private physicsEnabled = true
+
   // Platform / climbing
   private surfaceMode: 'ground' | 'on-platform' | 'climbing' = 'ground'
   private activePlatform: PagePlatform | null = null
@@ -156,20 +159,45 @@ export class Pet {
   /** Sync visual state with authoritative background state */
   updateState(state: PetState): void {
     this.stage = state.stage
-    this.direction = state.direction
 
-    // Only update position from background if on the ground and not in a special state
-    if (!this.dragging && this.action !== 'fall' && !this.bouncing && this.surfaceMode === 'ground') {
-      this.x = clamp(state.x, 0, window.innerWidth - PET_SIZE)
+    if (!this.dragging) {
+      if (!this.physicsEnabled) {
+        // Non-active tabs: fully mirror position and action from background
+        this.x = clamp(state.x, 0, window.innerWidth - PET_SIZE)
+        this.direction = state.direction
+        this.action = state.currentAction
+        this.animFrame = 0
+      } else if (this.action !== 'fall' && !this.bouncing) {
+        // Active tab: sync position except during local physics events
+        this.x = clamp(state.x, 0, window.innerWidth - PET_SIZE)
+        this.direction = state.direction
+      }
     }
 
-    // Update action if not behavior-locked
-    if (!this.behaviorLocked && this.action !== 'fall') {
+    // Update action if not behavior-locked (active tab only)
+    if (this.physicsEnabled && !this.behaviorLocked && this.action !== 'fall') {
       if (state.currentAction !== this.action) {
         this.action = state.currentAction
         this.animFrame = 0
       }
     }
+
+    this.updateCanvasPosition()
+  }
+
+  /** Enable/disable autonomous physics (only active tab runs physics) */
+  enablePhysics(enabled: boolean): void {
+    this.physicsEnabled = enabled
+    if (!enabled) {
+      this.bouncing = false
+      this.velocityX = 0
+      this.velocityY = 0
+    }
+  }
+
+  /** Get current position state for cross-tab sync */
+  getSyncState(): { x: number; direction: 1 | -1 } {
+    return { x: this.x, direction: this.direction }
   }
 
   /** Force a specific action (from external trigger like feed, chat) */
@@ -454,6 +482,13 @@ export class Pet {
 
   private physicsTick(): void {
     if (this.dragging) return
+
+    // Non-active tabs: only update visuals, no autonomous movement
+    if (!this.physicsEnabled) {
+      this.updateSquash()
+      this.updateCanvasPosition()
+      return
+    }
 
     // Squash animation update
     this.updateSquash()

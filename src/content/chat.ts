@@ -2,13 +2,12 @@
  * Chat bubble + chat panel UI, injected via Shadow DOM.
  *
  * - ChatBubble: small speech bubble above the pet, auto-hides.
- * - ChatPanel: 320x450 fixed panel with message list, input, quick actions.
+ * - ChatPanel: draggable fixed panel with message list, input, quick actions.
  */
 
 import type { Pet } from './pet'
 import { BUBBLE_DURATION, STAGE_NAMES } from '../shared/constants'
-import type { PetStage } from '../shared/types'
-import { t } from '../shared/i18n'
+import type { PetStage, ChatMessage } from '../shared/types'
 
 // ── Styles (injected into Shadow DOM) ───────────────────
 
@@ -19,7 +18,7 @@ const SHADOW_STYLES = `
     position: absolute;
     background: #fff;
     color: #333;
-    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-family: -apple-system, "Segoe UI", sans-serif;
     font-size: 13px;
     line-height: 1.4;
     padding: 8px 12px;
@@ -62,7 +61,7 @@ const SHADOW_STYLES = `
     flex-direction: column;
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-family: -apple-system, "Segoe UI", sans-serif;
     color: #e0e0e0;
     z-index: 20;
     opacity: 0;
@@ -84,6 +83,11 @@ const SHADOW_STYLES = `
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+    cursor: grab;
+    user-select: none;
+  }
+  .petclaw-panel-header.dragging {
+    cursor: grabbing;
   }
   .petclaw-panel-header .pet-name {
     font-weight: 600;
@@ -174,7 +178,7 @@ const SHADOW_STYLES = `
   }
 
   .petclaw-input-row {
-    padding: 8px 12px 12px;
+    padding: 8px 12px 8px;
     display: flex;
     gap: 8px;
     flex-shrink: 0;
@@ -208,6 +212,19 @@ const SHADOW_STYLES = `
     background: #555;
     cursor: not-allowed;
   }
+
+  .petclaw-footer {
+    padding: 4px 12px 8px;
+    text-align: center;
+    font-size: 10px;
+    color: #555;
+    flex-shrink: 0;
+  }
+  .petclaw-footer a {
+    color: #666;
+    text-decoration: none;
+  }
+  .petclaw-footer a:hover { color: #999; }
 `
 
 // ── ChatUI class ────────────────────────────────────────
@@ -222,6 +239,7 @@ export class ChatUI {
 
   // Panel
   private panelEl: HTMLDivElement
+  private headerEl: HTMLDivElement
   private messagesEl: HTMLDivElement
   private inputEl: HTMLInputElement
   private sendBtn: HTMLButtonElement
@@ -233,12 +251,13 @@ export class ChatUI {
   private nameEl: HTMLSpanElement
   private stageEl: HTMLSpanElement
 
-  // Cached action buttons for i18n updates
-  private feedBtn: HTMLButtonElement
-  private statusBtn: HTMLButtonElement
-
   // Streaming
   private streamingMsgEl: HTMLDivElement | null = null
+
+  // Drag panel
+  private panelDragging = false
+  private panelDragOffsetX = 0
+  private panelDragOffsetY = 0
 
   // Callbacks
   private _onSend: ((text: string) => void) | null = null
@@ -277,17 +296,21 @@ export class ChatUI {
         <input type="text" placeholder="Say something..." maxlength="500" />
         <button class="send-btn">Send</button>
       </div>
+      <div class="petclaw-footer">
+        &copy; <a href="https://github.com/pinkfunstudio" target="_blank">PinkFun Studio</a> &middot; MIT License
+      </div>
     `
     shadowRoot.appendChild(this.panelEl)
 
     // Cache elements
+    this.headerEl = this.panelEl.querySelector('.petclaw-panel-header')!
     this.nameEl = this.panelEl.querySelector('.pet-name')!
     this.stageEl = this.panelEl.querySelector('.pet-stage')!
     this.messagesEl = this.panelEl.querySelector('.petclaw-messages')!
     this.inputEl = this.panelEl.querySelector('.petclaw-input-row input')!
     this.sendBtn = this.panelEl.querySelector('.send-btn')!
 
-    // Bind events
+    // Bind send events
     this.sendBtn.addEventListener('click', () => this.handleSend())
     this.inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -296,40 +319,99 @@ export class ChatUI {
       }
     })
 
+    // Close button
     const closeBtn = this.panelEl.querySelector('.close-btn')!
     closeBtn.addEventListener('click', () => this.toggle())
 
     // Quick action buttons
-    this.feedBtn = this.panelEl.querySelector('[data-action="feed"]')! as HTMLButtonElement
-    this.feedBtn.addEventListener('click', () => {
-      if (this._onFeed) this._onFeed()
-    })
-    this.statusBtn = this.panelEl.querySelector('[data-action="status"]')! as HTMLButtonElement
-    this.statusBtn.addEventListener('click', () => {
-      if (this._onStatus) this._onStatus()
-    })
+    const feedBtn = this.panelEl.querySelector('[data-action="feed"]')! as HTMLButtonElement
+    feedBtn.addEventListener('click', () => { if (this._onFeed) this._onFeed() })
+    const statusBtn = this.panelEl.querySelector('[data-action="status"]')! as HTMLButtonElement
+    statusBtn.addEventListener('click', () => { if (this._onStatus) this._onStatus() })
 
-    // Stop click propagation so clicking the panel doesn't close it
+    // Stop click/key propagation so host page doesn't intercept
     this.panelEl.addEventListener('mousedown', (e) => e.stopPropagation())
     this.panelEl.addEventListener('touchstart', (e) => e.stopPropagation())
-
-    // Prevent host page (Gmail, Google Docs, etc.) from intercepting
-    // keystrokes when the user is typing in our input field.
-    // Use bubble phase (no `true`) so child handlers (input Enter) fire first.
     this.panelEl.addEventListener('keydown', (e) => e.stopPropagation())
     this.panelEl.addEventListener('keyup', (e) => e.stopPropagation())
     this.panelEl.addEventListener('keypress', (e) => e.stopPropagation())
+
+    // ── Draggable header ────────────────────────────────
+    this.headerEl.addEventListener('mousedown', this.handleHeaderMouseDown)
+    this.headerEl.addEventListener('touchstart', this.handleHeaderTouchStart, { passive: false })
+  }
+
+  // ── Panel drag handlers ─────────────────────────────
+
+  private handleHeaderMouseDown = (e: MouseEvent): void => {
+    // Don't drag if clicking the close button
+    if ((e.target as HTMLElement).classList.contains('close-btn')) return
+    e.preventDefault()
+    this.startPanelDrag(e.clientX, e.clientY)
+    window.addEventListener('mousemove', this.handlePanelMouseMove)
+    window.addEventListener('mouseup', this.handlePanelMouseUp)
+  }
+
+  private handlePanelMouseMove = (e: MouseEvent): void => {
+    this.movePanelDrag(e.clientX, e.clientY)
+  }
+
+  private handlePanelMouseUp = (): void => {
+    this.endPanelDrag()
+    window.removeEventListener('mousemove', this.handlePanelMouseMove)
+    window.removeEventListener('mouseup', this.handlePanelMouseUp)
+  }
+
+  private handleHeaderTouchStart = (e: TouchEvent): void => {
+    if ((e.target as HTMLElement).classList.contains('close-btn')) return
+    e.preventDefault()
+    const touch = e.touches[0]
+    this.startPanelDrag(touch.clientX, touch.clientY)
+    window.addEventListener('touchmove', this.handlePanelTouchMove, { passive: false })
+    window.addEventListener('touchend', this.handlePanelTouchEnd)
+  }
+
+  private handlePanelTouchMove = (e: TouchEvent): void => {
+    e.preventDefault()
+    const touch = e.touches[0]
+    this.movePanelDrag(touch.clientX, touch.clientY)
+  }
+
+  private handlePanelTouchEnd = (): void => {
+    this.endPanelDrag()
+    window.removeEventListener('touchmove', this.handlePanelTouchMove)
+    window.removeEventListener('touchend', this.handlePanelTouchEnd)
+  }
+
+  private startPanelDrag(clientX: number, clientY: number): void {
+    this.panelDragging = true
+    this.headerEl.classList.add('dragging')
+
+    // Switch from bottom/right to top/left positioning
+    const rect = this.panelEl.getBoundingClientRect()
+    this.panelEl.style.bottom = 'auto'
+    this.panelEl.style.right = 'auto'
+    this.panelEl.style.top = `${rect.top}px`
+    this.panelEl.style.left = `${rect.left}px`
+
+    this.panelDragOffsetX = clientX - rect.left
+    this.panelDragOffsetY = clientY - rect.top
+  }
+
+  private movePanelDrag(clientX: number, clientY: number): void {
+    if (!this.panelDragging) return
+    const x = Math.max(0, Math.min(window.innerWidth - 320, clientX - this.panelDragOffsetX))
+    const y = Math.max(0, Math.min(window.innerHeight - 100, clientY - this.panelDragOffsetY))
+    this.panelEl.style.left = `${x}px`
+    this.panelEl.style.top = `${y}px`
+  }
+
+  private endPanelDrag(): void {
+    this.panelDragging = false
+    this.headerEl.classList.remove('dragging')
   }
 
   // ── Public API ──────────────────────────────────────
-
-  /** Update all UI text to match current i18n language */
-  updateLanguage(): void {
-    this.feedBtn.textContent = t('feed')
-    this.statusBtn.textContent = t('status')
-    this.sendBtn.textContent = t('sendBtn')
-    this.inputEl.placeholder = t('inputPlaceholder')
-  }
 
   /** Update pet info shown in the header */
   updatePetInfo(name: string, stage: PetStage): void {
@@ -337,27 +419,35 @@ export class ChatUI {
     this.petStage = stage
     this.nameEl.textContent = name
     const stageLabel = STAGE_NAMES[stage]
-    this.stageEl.textContent = stageLabel ? `${stageLabel.zh} ${stageLabel.en}` : stage
+    this.stageEl.textContent = stageLabel ? stageLabel.en : stage
+  }
+
+  /** Load chat history from stored messages */
+  loadHistory(messages: ChatMessage[]): void {
+    this.messagesEl.innerHTML = ''
+    for (const msg of messages) {
+      const msgEl = document.createElement('div')
+      msgEl.className = `petclaw-msg ${msg.role === 'pet' ? 'pet' : 'user'}`
+      msgEl.textContent = msg.content
+      this.messagesEl.appendChild(msgEl)
+    }
+    this.scrollToBottom()
   }
 
   /** Show a speech bubble above the pet */
   showBubble(text: string): void {
-    // Clear any existing timer
     if (this.bubbleTimer !== null) {
       clearTimeout(this.bubbleTimer)
     }
 
     this.bubbleEl.textContent = text
 
-    // Position above pet
     const pos = this.pet.getPosition()
     this.bubbleEl.style.left = `${pos.x}px`
     this.bubbleEl.style.top = `${pos.y - 50}px`
 
-    // Show
     this.bubbleEl.classList.add('visible')
 
-    // Auto-hide
     this.bubbleTimer = window.setTimeout(() => {
       this.bubbleEl.classList.remove('visible')
       this.bubbleTimer = null
@@ -369,7 +459,6 @@ export class ChatUI {
     this.isOpen = !this.isOpen
     if (this.isOpen) {
       this.panelEl.classList.add('open')
-      // Focus input after transition
       setTimeout(() => this.inputEl.focus(), 300)
     } else {
       this.panelEl.classList.remove('open')
@@ -441,6 +530,10 @@ export class ChatUI {
       clearTimeout(this.bubbleTimer)
       this.bubbleTimer = null
     }
+    window.removeEventListener('mousemove', this.handlePanelMouseMove)
+    window.removeEventListener('mouseup', this.handlePanelMouseUp)
+    window.removeEventListener('touchmove', this.handlePanelTouchMove)
+    window.removeEventListener('touchend', this.handlePanelTouchEnd)
   }
 
   // ── Internal ──────────────────────────────────────────
