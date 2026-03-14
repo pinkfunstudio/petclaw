@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs",
     "watch": "node scripts/build.mjs --watch",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
